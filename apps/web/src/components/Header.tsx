@@ -1,7 +1,7 @@
 import { useStore } from "../lib/store.js";
 import { renderTimeline, saveProjectToServer } from "../lib/api.js";
 import { getErrorMessage } from "@mvs/shared";
-import { useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { QueueStatus } from "./QueueStatus.js";
 import { Library } from "./Library.js";
 import { toast } from "../lib/toast.js";
@@ -165,27 +165,82 @@ export function Header() {
               </button>
             </div>
           )}
-          {analysis && (
-            <label className="checkbox-inline" title="Apply 150ms alpha fade-in/out at each clip's edges">
-              <input
-                type="checkbox"
-                checked={fades}
-                onChange={(e) => setFades(e.target.checked)}
-              />
-              <span>fades</span>
-            </label>
-          )}
           {renderUrl && (
             <a href={renderUrl} target="_blank" className="btn" rel="noreferrer">
               View render
             </a>
           )}
-          <button type="button" className="btn primary" onClick={onExport} disabled={!analysis || rendering}>
-            {rendering ? "Rendering…" : "Export MP4"}
-          </button>
+          <div className="export-cluster">
+            <button type="button" className="btn primary" onClick={onExport} disabled={!analysis || rendering}>
+              {rendering ? "Rendering…" : "Export MP4"}
+            </button>
+            {analysis && (
+              <RenderOptionsMenu fades={fades} setFades={setFades} />
+            )}
+          </div>
         </div>
       </header>
       {showLibrary && <Library onClose={() => setShowLibrary(false)} />}
     </>
+  );
+}
+
+function RenderOptionsMenu({
+  fades,
+  setFades,
+}: {
+  fades: boolean;
+  setFades: (on: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  // Close on outside click / Escape.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className="render-options" ref={wrapRef}>
+      <button
+        type="button"
+        className="render-options-btn"
+        onClick={() => setOpen((o) => !o)}
+        title="Render options"
+        aria-label="render options"
+        aria-expanded={open}
+      >
+        ▾
+      </button>
+      {open && (
+        <div className="render-options-popover">
+          <label className="render-options-row">
+            <input
+              type="checkbox"
+              checked={fades}
+              onChange={(e) => setFades(e.target.checked)}
+            />
+            <span>
+              <span className="render-options-label">Edge fades</span>
+              <span className="render-options-hint">
+                150ms alpha fade-in/out at each clip's boundary
+              </span>
+            </span>
+          </label>
+        </div>
+      )}
+    </div>
   );
 }

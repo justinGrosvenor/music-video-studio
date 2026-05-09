@@ -242,9 +242,32 @@ function ClipsTab({
 }
 
 function RendersTab({ renders }: { renders: RenderEntry[] }) {
+  const [downloading, setDownloading] = useState<string | null>(null);
+
   if (!renders.length) {
     return <div className="library-empty">No renders yet. Export an MP4 from the editor.</div>;
   }
+
+  const onDownload = async (r: RenderEntry) => {
+    setDownloading(r.name);
+    try {
+      const res = await fetch(r.url);
+      if (!res.ok) throw new Error(`fetch ${res.status}`);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = r.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      toast.error(`Download failed: ${getErrorMessage(err)}`);
+    } finally {
+      setDownloading(null);
+    }
+  };
 
   return (
     <div className="library-grid">
@@ -267,7 +290,15 @@ function RendersTab({ renders }: { renders: RenderEntry[] }) {
           </div>
           <div className="library-card-actions">
             <a href={r.url} target="_blank" rel="noreferrer" className="btn">View</a>
-            <a href={r.url} download className="btn ghost">Download</a>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => onDownload(r)}
+              disabled={downloading === r.name}
+              title="Save MP4 to your computer"
+            >
+              {downloading === r.name ? "Downloading…" : "Download"}
+            </button>
           </div>
         </div>
       ))}

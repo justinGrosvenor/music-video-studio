@@ -146,6 +146,42 @@ input, textarea { font: inherit; color: inherit; }
 .checkbox-inline:hover { color: var(--text); background: var(--surface-2); }
 .checkbox-inline input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
 
+/* Export split-button cluster: [Export MP4][▾] with the chevron flush against
+   the primary button. The chevron opens a small popover for render options. */
+.export-cluster { display: inline-flex; align-items: stretch; }
+.export-cluster .btn.primary {
+  border-top-right-radius: 0; border-bottom-right-radius: 0;
+}
+.render-options { position: relative; display: inline-flex; }
+.render-options-btn {
+  background: var(--accent); color: white; border: 0;
+  border-left: 1px solid rgba(255,255,255,0.18);
+  padding: 0 10px;
+  border-top-right-radius: var(--r-2);
+  border-bottom-right-radius: var(--r-2);
+  cursor: pointer;
+  font-size: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.render-options-btn:hover { background: var(--accent-2); }
+.render-options-popover {
+  position: absolute; top: calc(100% + 6px); right: 0;
+  min-width: 240px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-2);
+  padding: var(--sp-3);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  z-index: 50;
+}
+.render-options-row {
+  display: flex; gap: 8px; align-items: flex-start;
+  cursor: pointer; color: var(--text);
+}
+.render-options-row input[type="checkbox"] { accent-color: var(--accent); margin-top: 2px; }
+.render-options-label { display: block; font-size: 13px; color: var(--text); }
+.render-options-hint { display: block; font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
 /* Left rail */
 .left { grid-area: left; border-right: 1px solid var(--border); background: var(--surface); padding: var(--sp-4) var(--sp-3); overflow-y: auto; }
 .left .section { margin-bottom: var(--sp-5); }

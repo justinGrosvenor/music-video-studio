@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { paths, storage } from "./storage.js";
 import { config } from "./config.js";
-import { runFfmpeg } from "./ffmpeg.js";
+import { runFfmpeg, probeDuration } from "./ffmpeg.js";
 
 export type RenderClip = {
   start: number;
@@ -34,6 +34,21 @@ export async function renderTimeline(req: RenderRequest): Promise<{ url: string 
   const outputName = `${req.projectId}.mp4`;
   const outputPath = join(paths.RENDERS, outputName);
 
+  // Probe each source video so we can time-stretch it into its timeline slot.
+  // Without this, sources shorter than their slot freeze on the last frame and
+  // sources longer than their slot get cut mid-motion (the "catch-up" feel).
+  // Probe failures degrade to no-stretch (the previous behavior).
+  const sourceDurations = await Promise.all(
+    req.clips.map(async (c) => {
+      try {
+        return await probeDuration(c.videoUrl);
+      } catch (err) {
+        console.warn(`render: probe failed for ${c.videoUrl}, skipping stretch`, err);
+        return c.end - c.start;
+      }
+    })
+  );
+
   const filterComplex: string[] = [];
   const inputs: string[] = [];
 
@@ -46,11 +61,17 @@ export async function renderTimeline(req: RenderRequest): Promise<{ url: string 
     const clip = req.clips[i]!;
     const inputIdx = i + 1;
     const tagOut = `v${i + 1}`;
+    const slotDur = clip.end - clip.start;
+    const srcDur = sourceDurations[i]!;
+    // Stretch factor: K > 1 slows the source (fills a longer slot), K < 1
+    // speeds it up (fits a shorter slot). Clamp K to a sane range so a
+    // garbage probe (1ms) doesn't blow the filter graph up.
+    const k = Math.max(0.25, Math.min(8, slotDur / srcDur));
 
     const baseChain =
       `[${inputIdx}:v]scale=1280:720:force_original_aspect_ratio=decrease,` +
       `pad=1280:720:(ow-iw)/2:(oh-ih)/2,` +
-      `setpts=PTS-STARTPTS+${clip.start}/TB`;
+      `setpts=(PTS-STARTPTS)*${k.toFixed(6)}+${clip.start.toFixed(6)}/TB`;
 
     const fadeChain = req.fades
       ? `,fade=t=in:st=${clip.start}:d=${FADE_DURATION}:alpha=1,` +
