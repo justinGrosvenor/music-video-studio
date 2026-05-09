@@ -32,6 +32,7 @@ export const Clip = z.object({
     "archetype",
     "generated",
     "textToVideo",
+    "library",
     "lipSync",
     "actTwo",
     "aleph",
@@ -41,6 +42,9 @@ export const Clip = z.object({
   archetypeUrl: z.string().optional(),
   /** When source = "continue": enrich prompt with motion from previous clip. */
   continuity: z.boolean().optional(),
+  /** When source = "continue" and both neighbors are ready: send the prev's
+   *  last frame AND the next's first frame so Runway interpolates between them. */
+  bridge: z.boolean().optional(),
   prompt: z.string().optional(),
   /** When source = "generated": prompt for the text-to-image seed step.
    *  Falls back to `prompt` if not set. */

@@ -223,15 +223,6 @@ export function LeftRail() {
       <div className="section">
         <div className="section-header">
           <span className="label">Lookbook</span>
-          <button
-            type="button"
-            className="add"
-            onClick={() => setShowGenerator((s) => !s)}
-            disabled={lookbook.length >= LOOKBOOK_MAX}
-            title={lookbook.length >= LOOKBOOK_MAX ? "lookbook full" : "generate an image"}
-          >
-            {showGenerator ? "close" : "generate"}
-          </button>
           <span className="dim" style={{ fontSize: 11 }}>
             {lookbook.length}/{LOOKBOOK_MAX}
           </span>
@@ -265,6 +256,17 @@ export function LeftRail() {
           {Array.from({ length: Math.max(0, 3 - lookbook.length - 1) }).map((_, i) => (
             <div key={`ph-${i}`} className="tile placeholder" />
           ))}
+        </div>
+        <div className="lookbook-actions">
+          <button
+            type="button"
+            className="add"
+            onClick={() => setShowGenerator((s) => !s)}
+            disabled={lookbook.length >= LOOKBOOK_MAX}
+            title={lookbook.length >= LOOKBOOK_MAX ? "lookbook full" : "generate an image"}
+          >
+            {showGenerator ? "close" : "generate"}
+          </button>
         </div>
         {showGenerator && (
           <ImageGenerator

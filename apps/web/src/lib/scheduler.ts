@@ -13,6 +13,7 @@ import {
 } from "./api.js";
 import { toast } from "./toast.js";
 import type { Clip, GenerationModel, Task } from "@mvs/shared";
+import { modelSupportsBridge } from "@mvs/shared";
 
 /** How many Runway generations to run in parallel. */
 export const MAX_CONCURRENT = 3;
@@ -48,10 +49,11 @@ export type Job = {
     sectionLabel: string;
     energy: number;
     model?: GenerationModel;
-    /** For continue: analyze previous clip motion to enrich the prompt. */
-    continuity?: boolean;
     /** For generated: lookbook URLs to pass as references to text-to-image. */
     referenceImages?: string[];
+    /** For continue: when true and the model supports a `last` keyframe AND
+     *  the next clip is ready, send first+last frames so Runway interpolates. */
+    bridge?: boolean;
   };
 };
 
@@ -71,8 +73,8 @@ export type EnqueueInput = {
   sectionLabel: string;
   energy: number;
   model?: GenerationModel;
-  continuity?: boolean;
   referenceImages?: string[];
+  bridge?: boolean;
 };
 
 const newJobId = () => `job-${crypto.randomUUID().slice(0, 8)}`;
@@ -122,8 +124,8 @@ export function enqueueGeneration(input: EnqueueInput): string {
       sectionLabel: input.sectionLabel,
       energy: input.energy,
       model: input.model,
-      continuity: input.continuity,
       referenceImages: input.referenceImages,
+      bridge: input.bridge,
     },
   };
   useStore.getState().setJobs((prev) => [...prev, job]);
@@ -186,7 +188,7 @@ function pump() {
   }
 }
 
-type ContinueResult = { seed: string };
+type ContinueResult = { seed: string; seedEnd?: string };
 
 async function resolveContinue(job: Job): Promise<ContinueResult> {
   const { clips } = useStore.getState();
@@ -200,13 +202,31 @@ async function resolveContinue(job: Job): Promise<ContinueResult> {
   // timeline duration) breaks when the model clamped output to a shorter
   // duration (e.g., Veo 3.1 caps at 8s but the timeline clip can be longer),
   // because `-ss <past_eof>` produces zero frames and ffmpeg silently exits 0.
+  let seed: string;
   try {
     const { url } = await extractLastFrame(prev.videoUrl);
-    return { seed: url };
+    seed = url;
   } catch (err) {
     console.warn("continue resolution failed; using fallback seed", err);
     return { seed: job.input.seedImageUrl };
   }
+
+  // Bridge mode: if the user opted in, the chosen model accepts a `last`
+  // keyframe, AND the next clip is ready, also extract the next clip's
+  // first frame (time=0) so Runway interpolates between the two.
+  if (job.input.bridge && modelSupportsBridge(job.input.model)) {
+    const next = clips[idx + 1];
+    if (next?.status === "ready" && next.videoUrl) {
+      try {
+        const { url } = await extractLastFrame(next.videoUrl, 0);
+        return { seed, seedEnd: url };
+      } catch (err) {
+        console.warn("bridge: next-clip first-frame failed; using single-frame init", err);
+      }
+    }
+  }
+
+  return { seed };
 }
 
 function isCancelled(jobId: string): boolean {
@@ -297,15 +317,18 @@ async function startTask(job: Job): Promise<{ id: string }> {
   // `generated` (which first generates the seed image from text).
   // (`actTwo` will need its own branch once we wire webcam recording.)
   let seed = job.input.seedImageUrl;
+  let seedEnd: string | undefined;
   const finalPrompt = promptText;
   if (job.input.source === "continue") {
     const cont = await resolveContinue(job);
     seed = cont.seed;
+    seedEnd = cont.seedEnd;
   } else if (job.input.source === "generated") {
     seed = await generateSeedImage(job, promptText);
   }
   return startImageToVideo({
     promptImage: seed,
+    ...(seedEnd ? { promptImageEnd: seedEnd } : {}),
     promptText: finalPrompt,
     ratio: "1280:720",
     duration,

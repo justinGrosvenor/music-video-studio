@@ -150,8 +150,9 @@ input, textarea { font: inherit; color: inherit; }
 .left { grid-area: left; border-right: 1px solid var(--border); background: var(--surface); padding: var(--sp-4) var(--sp-3); overflow-y: auto; }
 .left .section { margin-bottom: var(--sp-5); }
 .left .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--sp-2); }
-.left .section-header .add { color: var(--text-dim); font-size: 11px; cursor: pointer; background: none; border: 0; padding: 0; }
-.left .section-header .add:hover { color: var(--text); }
+.left .add, .left .section-header .add { color: var(--text-dim); font-size: 11px; cursor: pointer; background: none; border: 0; padding: 0; }
+.left .add:hover, .left .section-header .add:hover { color: var(--text); }
+.left .add:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .cast-card {
   display: flex;
@@ -491,6 +492,46 @@ input, textarea { font: inherit; color: inherit; }
   padding: 0 2px;
 }
 .archetype-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+
+/* Saved-clip picker (Sidebar, source=library) — list of mini cards. */
+.saved-clip-list {
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  max-height: 320px; overflow-y: auto;
+  margin-top: 4px;
+}
+.saved-clip-item {
+  position: relative;
+  display: flex; gap: var(--sp-2); align-items: stretch;
+  padding: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  transition: border-color 100ms ease, background 100ms ease;
+}
+.saved-clip-item:hover { border-color: var(--border-strong); background: var(--surface-3); }
+.saved-clip-item.selected { border-color: var(--accent); background: var(--accent-soft); }
+.saved-clip-thumb {
+  width: 80px; height: 45px;
+  flex-shrink: 0;
+  background: black; border-radius: var(--r-1);
+  object-fit: cover;
+}
+.saved-clip-meta { min-width: 0; flex: 1; display: flex; flex-direction: column; justify-content: center; }
+.saved-clip-name {
+  font-size: 12px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.saved-clip-sub {
+  font-size: 10px; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.saved-clip-tick {
+  position: absolute; top: 4px; right: 6px;
+  color: var(--accent); font-size: 12px; font-weight: 600;
+}
 .archetype-tile-wrap { position: relative; aspect-ratio: 1; }
 .archetype-tile-wrap.custom .archetype-tile { box-shadow: inset 0 0 0 1px var(--accent-dim); }
 .archetype-tile {
@@ -550,6 +591,13 @@ textarea.prompt {
 textarea.prompt:focus { border-color: var(--accent-dim); outline: none; }
 textarea.prompt::placeholder { color: var(--text-faint); }
 
+/* Right-aligned action row beneath the Lookbook tile grid. */
+.lookbook-actions {
+  display: flex; justify-content: flex-end;
+  margin-top: 6px;
+}
+.lookbook-actions .add { font-size: 11px; }
+
 /* Lookbook image generator — sits under the lookbook tile grid when toggled. */
 .image-generator {
   display: flex; flex-direction: column; gap: var(--sp-2);
@@ -593,6 +641,13 @@ textarea.prompt::placeholder { color: var(--text-faint); }
   font-size: 12px; padding: 8px 12px;
   text-align: center; justify-content: center;
 }
+.clear-clip-btn {
+  width: 100%; margin-top: 6px;
+  font-size: 11px; padding: 6px 12px;
+  color: var(--text-dim);
+  text-align: center; justify-content: center;
+}
+.clear-clip-btn:hover { color: var(--danger); border-color: var(--danger); }
 
 .error-card {
   background: rgba(239, 79, 94, 0.10);

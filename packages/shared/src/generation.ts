@@ -16,6 +16,11 @@ export type VideoGenerationModel = z.infer<typeof VideoGenerationModel>;
 
 export const ImageToVideoRequest = z.object({
   promptImage: z.string().url(),
+  /** Optional second keyframe — when set, the model interpolates between
+   *  promptImage (first) and promptImageEnd (last). Only honored by models
+   *  that accept a `last` position: seedance2, veo3.1, veo3.1_fast,
+   *  gen3a_turbo. Silently ignored by gen4.5 / gen4_turbo / veo3. */
+  promptImageEnd: z.string().url().optional(),
   promptText: z.string().max(1000).optional(),
   ratio: z
     .enum([
@@ -27,6 +32,19 @@ export const ImageToVideoRequest = z.object({
   model: VideoGenerationModel.default("gen4_turbo"),
 });
 export type ImageToVideoRequest = z.infer<typeof ImageToVideoRequest>;
+
+/** Image-to-video models that accept a `last` keyframe (so a bridge between
+ *  neighboring clips can interpolate first → last). */
+export const BRIDGE_CAPABLE_MODELS = [
+  "seedance2",
+  "veo3.1",
+  "veo3.1_fast",
+  "gen3a_turbo",
+] as const;
+export type BridgeCapableModel = typeof BRIDGE_CAPABLE_MODELS[number];
+export function modelSupportsBridge(model: VideoGenerationModel | undefined): boolean {
+  return BRIDGE_CAPABLE_MODELS.includes((model ?? "seedance2") as BridgeCapableModel);
+}
 
 export const TextToVideoRequest = z.object({
   promptText: z.string().min(1).max(3500),

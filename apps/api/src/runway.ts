@@ -77,17 +77,61 @@ async function toRunwayUri(url: string): Promise<string> {
 
 export async function imageToVideo(req: ImageToVideoRequest): Promise<RunwayTask> {
   try {
+    // Bridge-mode prompt image (array with first + last keyframes). Only
+    // valid for seedance2 / veo3.1 / veo3.1_fast / gen3a_turbo; silently
+    // dropped for models that only accept a first frame.
+    const buildBridgePrompt = async () => {
+      const first = await toRunwayUri(req.promptImage);
+      const last = await toRunwayUri(req.promptImageEnd!);
+      return [
+        { uri: first, position: "first" as const },
+        { uri: last, position: "last" as const },
+      ];
+    };
+    const wantsBridge = !!req.promptImageEnd;
+
     if (req.model === "seedance2") {
-      const imageUri = await toRunwayUri(req.promptImage);
+      const promptImage = wantsBridge
+        ? await buildBridgePrompt()
+        : [{ uri: await toRunwayUri(req.promptImage), position: "first" as const }];
       const task = await runway.imageToVideo.create({
         model: "seedance2",
-        promptImage: [{ uri: imageUri, position: "first" as const }],
+        promptImage,
         promptText: req.promptText,
         ratio: "1280:720",
         duration: req.duration,
       });
       return { id: task.id };
     }
+    if (req.model === "veo3.1" || req.model === "veo3.1_fast") {
+      const promptImage = wantsBridge
+        ? await buildBridgePrompt()
+        : await toRunwayUri(req.promptImage);
+      const task = await runway.imageToVideo.create({
+        model: req.model,
+        promptImage,
+        promptText: req.promptText,
+        ratio: req.ratio as "1280:720",
+        duration: req.duration as 4 | 6 | 8,
+      });
+      return { id: task.id };
+    }
+    if (req.model === "gen3a_turbo") {
+      const promptImage = wantsBridge
+        ? await buildBridgePrompt()
+        : await toRunwayUri(req.promptImage);
+      const task = await runway.imageToVideo.create({
+        model: "gen3a_turbo",
+        promptImage,
+        promptText: req.promptText ?? "",
+        // gen3a_turbo only accepts 1280:768 or 768:1280; not exposed in the
+        // UI today, so the cast is a placeholder for direct API callers.
+        ratio: req.ratio as "1280:768",
+        duration: req.duration as 5 | 10,
+      });
+      return { id: task.id };
+    }
+    // First-frame-only models below — promptImageEnd is silently dropped.
     if (req.model === "gen4.5") {
       const imageUri = await toRunwayUri(req.promptImage);
       const task = await runway.imageToVideo.create({
@@ -96,17 +140,6 @@ export async function imageToVideo(req: ImageToVideoRequest): Promise<RunwayTask
         promptText: req.promptText ?? "",
         ratio: req.ratio as "1280:720",
         duration: req.duration,
-      });
-      return { id: task.id };
-    }
-    if (req.model === "veo3.1" || req.model === "veo3.1_fast") {
-      const imageUri = await toRunwayUri(req.promptImage);
-      const task = await runway.imageToVideo.create({
-        model: req.model,
-        promptImage: imageUri,
-        promptText: req.promptText,
-        ratio: req.ratio as "1280:720",
-        duration: req.duration as 4 | 6 | 8,
       });
       return { id: task.id };
     }
@@ -121,7 +154,7 @@ export async function imageToVideo(req: ImageToVideoRequest): Promise<RunwayTask
       });
       return { id: task.id };
     }
-    // gen4_turbo / gen3a_turbo — both support data URIs and the same shape.
+    // gen4_turbo — supports data URIs and ignores promptImageEnd.
     // Some ratios in our schema (1080:1920, 1920:1080) are veo-only; the UI
     // pins gen4_turbo to a 1280:720-family ratio, so the cast is safe.
     const task = await runway.imageToVideo.create({

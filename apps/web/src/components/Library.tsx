@@ -71,9 +71,12 @@ export function Library({ onClose }: { onClose: () => void }) {
       return;
     }
     updateClip(selectedClipId, {
+      source: "library",
       videoUrl: clip.videoUrl,
       status: "ready",
       lastError: undefined,
+      generationTaskId: undefined,
+      prompt: clip.prompt ?? undefined,
     });
     onClose();
     toast.success(`Applied "${clip.name}" to selected clip`);

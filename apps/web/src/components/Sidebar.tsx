@@ -1,9 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore, MAX_CLIP_LEN } from "../lib/store.js";
 import type { Clip, GenerationModel } from "@mvs/shared";
 import { enqueueGeneration } from "../lib/scheduler.js";
-import { saveClipToServer } from "../lib/api.js";
-import { getErrorMessage } from "@mvs/shared";
+import { listSavedClips, saveClipToServer, type SavedClip } from "../lib/api.js";
+import { getErrorMessage, modelSupportsBridge } from "@mvs/shared";
 import { AssetUploader } from "./AssetUploader.js";
 import { toast } from "../lib/toast.js";
 
@@ -12,6 +12,7 @@ const SOURCES: Array<{ value: Clip["source"]; label: string; desc: string }> = [
   { value: "archetype", label: "Seed from lookbook", desc: "use a specific lookbook image as the init frame" },
   { value: "generated", label: "Generate fresh image", desc: "text-to-image seed, then image-to-video" },
   { value: "textToVideo", label: "Text-to-video", desc: "prompt → video directly, no seed image" },
+  { value: "library", label: "From clip library", desc: "reuse a previously saved clip — no generation" },
   { value: "lipSync", label: "Character sings this section", desc: "Lip Sync · vocal stem" },
   { value: "actTwo", label: "Hero performance shot", desc: "Act-Two · record yourself · ≤30s" },
   { value: "aleph", label: "Restyle existing clip", desc: "Aleph · video-to-video" },
@@ -74,15 +75,28 @@ export function Sidebar() {
 
   const clipIdx = clips.findIndex((c) => c.id === clip.id);
   const hasPrev = clipIdx > 0 && clips[clipIdx - 1]?.status === "ready";
+  const hasNext = clipIdx >= 0 && clipIdx < clips.length - 1 && clips[clipIdx + 1]?.status === "ready";
 
   const effectiveModel = clip.model ?? "seedance2";
-  const showModelPicker = clip.source !== "lipSync" && clip.source !== "actTwo";
+  const showModelPicker =
+    clip.source !== "lipSync" &&
+    clip.source !== "actTwo" &&
+    clip.source !== "library";
+  const isLibrarySource = clip.source === "library";
 
   const setSource = (source: Clip["source"]) => updateClip(clip.id, { source });
   const setModel = (model: GenerationModel) => updateClip(clip.id, { model });
   const setPrompt = (value: string) => updateClip(clip.id, { prompt: value });
   const setImagePrompt = (value: string) => updateClip(clip.id, { imagePrompt: value });
-  const setContinuity = (on: boolean) => updateClip(clip.id, { continuity: on });
+  const setBridge = (on: boolean) => updateClip(clip.id, { bridge: on });
+
+  // Bridge toggle visibility: only when continue + both neighbors ready +
+  // selected model accepts a `last` keyframe.
+  const canBridge =
+    clip.source === "continue" &&
+    hasPrev &&
+    hasNext &&
+    modelSupportsBridge(effectiveModel);
 
   const onSplit = () => {
     const r = splitAtPlayhead();
@@ -135,8 +149,8 @@ export function Sidebar() {
       sectionLabel,
       energy,
       model: showModelPicker ? effectiveModel : undefined,
-      continuity: clip.source === "continue" ? clip.continuity : undefined,
       referenceImages: clip.source === "generated" ? lookbook.slice(0, 3) : undefined,
+      bridge: canBridge && (clip.bridge ?? false) ? true : undefined,
     });
   };
 
@@ -189,15 +203,28 @@ export function Sidebar() {
         clip={clip}
         effectiveModel={effectiveModel}
         showModelPicker={showModelPicker}
-        hasPrev={hasPrev}
         lookbook={lookbook}
+        canBridge={canBridge}
         onSourceChange={setSource}
         onModelChange={setModel}
-        onContinuityChange={setContinuity}
+        onBridgeChange={setBridge}
         onUpdateClip={updateClip}
       />
 
-      {clip.source === "generated" ? (
+      {isLibrarySource ? (
+        <SavedClipPicker
+          currentVideoUrl={clip.videoUrl}
+          onPick={(saved) =>
+            updateClip(clip.id, {
+              videoUrl: saved.videoUrl,
+              status: "ready",
+              lastError: undefined,
+              generationTaskId: undefined,
+              prompt: saved.prompt ?? undefined,
+            })
+          }
+        />
+      ) : clip.source === "generated" ? (
         <>
           <div className="option-group">
             <div className="label">Image prompt</div>
@@ -252,30 +279,32 @@ export function Sidebar() {
         </div>
       )}
 
-      <button
-        className="generate-btn"
-        onClick={onGenerate}
-        disabled={
-          clip.status === "queued" ||
-          clip.status === "generating" ||
-          !canGenerate.ok
-        }
-        title={canGenerate.ok ? undefined : canGenerate.reason}
-      >
-        {clip.status === "queued"
-          ? "Queued…"
-          : clip.status === "generating"
-            ? "Generating…"
-            : clip.status === "failed"
-              ? "Retry"
-              : clip.source === "aleph"
-                ? "Restyle clip"
-                : clip.source === "lipSync"
-                  ? "Lip-sync vocal"
-                  : clip.status === "ready"
-                    ? "Regenerate"
-                    : "Generate"}
-      </button>
+      {!isLibrarySource && (
+        <button
+          className="generate-btn"
+          onClick={onGenerate}
+          disabled={
+            clip.status === "queued" ||
+            clip.status === "generating" ||
+            !canGenerate.ok
+          }
+          title={canGenerate.ok ? undefined : canGenerate.reason}
+        >
+          {clip.status === "queued"
+            ? "Queued…"
+            : clip.status === "generating"
+              ? "Generating…"
+              : clip.status === "failed"
+                ? "Retry"
+                : clip.source === "aleph"
+                  ? "Restyle clip"
+                  : clip.source === "lipSync"
+                    ? "Lip-sync vocal"
+                    : clip.status === "ready"
+                      ? "Regenerate"
+                      : "Generate"}
+        </button>
+      )}
 
       {clip.status === "ready" && clip.videoUrl && (
         <button
@@ -284,6 +313,27 @@ export function Sidebar() {
           disabled={savingClip}
         >
           {savingClip ? "Saving…" : "Save to clip library"}
+        </button>
+      )}
+
+      {(clip.videoUrl || clip.status !== "empty") && (
+        <button
+          type="button"
+          className="btn ghost clear-clip-btn"
+          onClick={() => {
+            const isReady = clip.status === "ready";
+            if (isReady && !confirm("Clear this clip's video? Source choice and prompts are kept.")) return;
+            updateClip(clip.id, {
+              status: "empty",
+              videoUrl: undefined,
+              thumbnailUrl: undefined,
+              generationTaskId: undefined,
+              lastError: undefined,
+            });
+          }}
+          title="Clear this clip's video — keeps source and prompt"
+        >
+          Clear clip
         </button>
       )}
     </aside>
@@ -329,6 +379,11 @@ function checkCanGenerate(
     // ("section, energy x, cinematic") when blank.
     return { ok: true };
   }
+  if (clip.source === "library") {
+    // The library picker applies the videoUrl directly; the Generate button
+    // isn't even shown for this source. Always ok.
+    return { ok: true };
+  }
   if (clip.source === "continue") {
     // Seed comes from the previous clip's last frame; the character image is
     // only a fallback for the very first clip on the timeline.
@@ -346,21 +401,21 @@ function SourcePicker({
   clip,
   effectiveModel,
   showModelPicker,
-  hasPrev,
   lookbook,
+  canBridge,
   onSourceChange,
   onModelChange,
-  onContinuityChange,
+  onBridgeChange,
   onUpdateClip,
 }: {
   clip: Clip;
   effectiveModel: GenerationModel;
   showModelPicker: boolean;
-  hasPrev: boolean;
   lookbook: string[];
+  canBridge: boolean;
   onSourceChange: (source: Clip["source"]) => void;
   onModelChange: (model: GenerationModel) => void;
-  onContinuityChange: (on: boolean) => void;
+  onBridgeChange: (on: boolean) => void;
   onUpdateClip: (id: string, patch: Partial<Clip>) => void;
 }) {
   return (
@@ -400,15 +455,17 @@ function SourcePicker({
         </div>
       )}
 
-      {clip.source === "continue" && hasPrev && (
+      {canBridge && (
         <label className="continuity-toggle">
           <input
             type="checkbox"
-            checked={clip.continuity ?? false}
-            onChange={(e) => onContinuityChange(e.target.checked)}
+            checked={clip.bridge ?? false}
+            onChange={(e) => onBridgeChange(e.target.checked)}
           />
-          <span>Motion continuity</span>
-          <span className="select-desc">analyze previous clip to match motion</span>
+          <span>Bridge between neighbors</span>
+          <span className="select-desc">
+            interpolate from prev's last frame to next's first frame
+          </span>
         </label>
       )}
 
@@ -506,6 +563,85 @@ function ArchetypeGrid({
       <AssetUploader className="archetype-tile add" onUploaded={onPick}>
         <span className="tile-add-label">+</span>
       </AssetUploader>
+    </div>
+  );
+}
+
+function SavedClipPicker({
+  currentVideoUrl,
+  onPick,
+}: {
+  currentVideoUrl: string | undefined;
+  onPick: (clip: SavedClip) => void;
+}) {
+  const [clips, setClips] = useState<SavedClip[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = () => {
+    setLoading(true);
+    setError(null);
+    listSavedClips()
+      .then(setClips)
+      .catch((err) => setError(getErrorMessage(err)))
+      .finally(() => setLoading(false));
+  };
+
+  // Load on mount; not on every render — picker re-fetches via the refresh button.
+  useEffect(refresh, []);
+
+  return (
+    <div className="option-group">
+      <div className="label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span>Saved clips</span>
+        <button type="button" className="add" onClick={refresh} disabled={loading}>
+          {loading ? "…" : "refresh"}
+        </button>
+      </div>
+      {error && <div className="cast-error">{error}</div>}
+      {clips && clips.length === 0 && !error && (
+        <div className="archetype-empty">
+          No saved clips yet. Generate a clip, then "Save to clip library" from the sidebar.
+        </div>
+      )}
+      {clips && clips.length > 0 && (
+        <div className="saved-clip-list">
+          {clips.map((c) => {
+            const selected = c.videoUrl === currentVideoUrl;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                className={`saved-clip-item${selected ? " selected" : ""}`}
+                onClick={() => onPick(c)}
+                title={selected ? "currently applied — click to re-apply" : "apply to this segment"}
+              >
+                <video
+                  className="saved-clip-thumb"
+                  src={c.videoUrl}
+                  muted
+                  playsInline
+                  preload="metadata"
+                  onMouseEnter={(e) => (e.currentTarget as HTMLVideoElement).play().catch(() => {})}
+                  onMouseLeave={(e) => {
+                    const v = e.currentTarget as HTMLVideoElement;
+                    v.pause();
+                    v.currentTime = 0;
+                  }}
+                />
+                <div className="saved-clip-meta">
+                  <div className="saved-clip-name">{c.name}</div>
+                  <div className="saved-clip-sub">
+                    {c.duration.toFixed(1)}s · {c.source}
+                    {c.sectionLabel ? ` · ${c.sectionLabel}` : ""}
+                  </div>
+                </div>
+                {selected && <span className="saved-clip-tick">✓</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
