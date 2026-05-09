@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useStore, MAX_CLIP_LEN } from "../lib/store.js";
 import type { Clip, GenerationModel } from "@mvs/shared";
 import { enqueueGeneration } from "../lib/scheduler.js";
-import { listSavedClips, saveClipToServer, type SavedClip } from "../lib/api.js";
+import { listSavedClips, type SavedClip } from "../lib/api.js";
 import { getErrorMessage, modelSupportsBridge } from "@mvs/shared";
 import { AssetUploader } from "./AssetUploader.js";
 import { toast } from "../lib/toast.js";
@@ -60,7 +60,6 @@ export function Sidebar() {
   const mergeWithRight = useStore((s) => s.mergeWithRight);
   const songId = useStore((s) => s.songId);
   const audioUrl = useStore((s) => s.audioUrl);
-  const [savingClip, setSavingClip] = useState(false);
 
   const clip = useMemo(() => clips.find((c) => c.id === selectedId) ?? null, [clips, selectedId]);
 
@@ -77,7 +76,11 @@ export function Sidebar() {
   const hasPrev = clipIdx > 0 && clips[clipIdx - 1]?.status === "ready";
   const hasNext = clipIdx >= 0 && clipIdx < clips.length - 1 && clips[clipIdx + 1]?.status === "ready";
 
-  const effectiveModel = clip.model ?? "seedance2";
+  // Per-source default model. Continue uses Veo 3.1 Fast — strongest
+  // music-responsive motion at low latency. Everything else falls through
+  // to SeedDance 2 (high-quality general purpose).
+  const effectiveModel =
+    clip.model ?? (clip.source === "continue" ? "veo3.1_fast" : "seedance2");
   const showModelPicker =
     clip.source !== "lipSync" &&
     clip.source !== "actTwo" &&
@@ -152,27 +155,6 @@ export function Sidebar() {
       referenceImages: clip.source === "generated" ? lookbook.slice(0, 3) : undefined,
       bridge: canBridge && (clip.bridge ?? false) ? true : undefined,
     });
-  };
-
-  const onSaveClip = async () => {
-    if (!clip.videoUrl || clip.status !== "ready") return;
-    setSavingClip(true);
-    try {
-      await saveClipToServer({
-        id: `clip-${crypto.randomUUID().slice(0, 8)}`,
-        name: prompt?.slice(0, 60) || `${sectionLabel} clip`,
-        videoUrl: clip.videoUrl,
-        source: clip.source,
-        prompt: prompt || null,
-        duration: durationSec,
-        sectionLabel,
-      });
-      toast.success("Clip saved to library");
-    } catch (err) {
-      toast.error(`Save failed: ${getErrorMessage(err)}`);
-    } finally {
-      setSavingClip(false);
-    }
   };
 
   return (
@@ -303,16 +285,6 @@ export function Sidebar() {
                     : clip.status === "ready"
                       ? "Regenerate"
                       : "Generate"}
-        </button>
-      )}
-
-      {clip.status === "ready" && clip.videoUrl && (
-        <button
-          className="btn save-clip-btn"
-          onClick={onSaveClip}
-          disabled={savingClip}
-        >
-          {savingClip ? "Saving…" : "Save to clip library"}
         </button>
       )}
 
@@ -601,7 +573,7 @@ function SavedClipPicker({
       {error && <div className="cast-error">{error}</div>}
       {clips && clips.length === 0 && !error && (
         <div className="archetype-empty">
-          No saved clips yet. Generate a clip, then "Save to clip library" from the sidebar.
+          No saved clips yet. Generated clips get saved here automatically — generate one and it'll appear.
         </div>
       )}
       {clips && clips.length > 0 && (

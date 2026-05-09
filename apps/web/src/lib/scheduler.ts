@@ -9,6 +9,7 @@ import {
   extractLastFrame,
   sliceAudio,
   ensureVocalStem,
+  saveClipToServer,
   ApiError,
 } from "./api.js";
 import { toast } from "./toast.js";
@@ -385,13 +386,27 @@ async function run(jobId: string): Promise<void> {
     }
 
     if (final.status === "SUCCEEDED" && final.output?.[0]) {
+      const videoUrl = final.output[0];
       setJobPatch(jobId, { state: "succeeded", completedAt: Date.now() });
       useStore.getState().updateClip(job.clipId, {
-        videoUrl: final.output[0],
+        videoUrl,
         status: "ready",
         lastError: undefined,
       });
       toast.success(`Clip ready (${job.input.sectionLabel})`);
+
+      // Auto-save into the clip library. Uses the timeline clip's id as the
+      // saved-clip id so re-generations overwrite the same entry instead of
+      // piling up duplicates. Failure is logged but doesn't block the user.
+      void saveClipToServer({
+        id: job.clipId,
+        name: job.input.prompt?.slice(0, 60) || `${job.input.sectionLabel} clip`,
+        videoUrl,
+        source: job.input.source,
+        prompt: job.input.prompt || null,
+        duration: job.input.duration,
+        sectionLabel: job.input.sectionLabel,
+      }).catch((err) => console.warn("auto-save to clip library failed", err));
     } else {
       const reason = final.error ?? `task ended in ${final.status} with no output`;
       setJobPatch(jobId, { state: "failed", error: reason, completedAt: Date.now() });
