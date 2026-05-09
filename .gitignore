@@ -1,0 +1,35 @@
+node_modules
+dist
+build
+*.tgz
+
+.env
+.env.*local
+
+.DS_Store
+.idea
+*.tsbuildinfo
+.eslintcache
+.cache
+.turbo
+
+*.log
+logs
+
+.venv
+__pycache__
+*.pyc
+
+# Runtime storage tree — uploads, renders, analysis cache, saved projects/clips.
+# All regeneratable or user-data; never commit to source.
+storage/
+apps/api/storage/
+
+.terragrunt-cache
+.terraform
+*.tfstate
+*.tfstate.*
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

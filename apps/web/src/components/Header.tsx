@@ -1,0 +1,191 @@
+import { useStore } from "../lib/store.js";
+import { renderTimeline, saveProjectToServer } from "../lib/api.js";
+import { getErrorMessage } from "@mvs/shared";
+import { useState, useCallback } from "react";
+import { QueueStatus } from "./QueueStatus.js";
+import { Library } from "./Library.js";
+import { toast } from "../lib/toast.js";
+
+export function Header() {
+  const songId = useStore((s) => s.songId);
+  const songFilename = useStore((s) => s.songFilename);
+  const audioUrl = useStore((s) => s.audioUrl);
+  const analysis = useStore((s) => s.analysis);
+  const clips = useStore((s) => s.clips);
+  const resetProject = useStore((s) => s.resetProject);
+  const unloadSong = useStore((s) => s.unloadSong);
+  const projectId = useStore((s) => s.projectId);
+  const projectName = useStore((s) => s.projectName);
+  const setProjectName = useStore((s) => s.setProjectName);
+  const getSnapshot = useStore((s) => s.getSnapshot);
+  const [renderUrl, setRenderUrl] = useState<string | null>(null);
+  const [rendering, setRendering] = useState(false);
+  const [fades, setFades] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [showNameInput, setShowNameInput] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+
+  const onNewProject = () => {
+    if (!songId && !analysis) return;
+    if (!confirm("Discard current project and start over?")) return;
+    resetProject();
+  };
+
+  const onChangeSong = () => {
+    if (!songId) return;
+    if (clips.some((c) => c.status === "ready" || c.status === "queued" || c.status === "generating")) {
+      if (!confirm("Swap song? Generated clips will be cleared (cast and lookbook stay).")) return;
+    }
+    unloadSong();
+  };
+
+  const doSave = useCallback(async (name: string) => {
+    if (!songId || !analysis) return;
+    setProjectName(name);
+    const id = projectId ?? `proj-${crypto.randomUUID().slice(0, 8)}`;
+    if (!projectId) useStore.setState({ projectId: id });
+
+    setSaving(true);
+    try {
+      await saveProjectToServer(id, name, getSnapshot());
+      toast.success("Project saved");
+    } catch (err) {
+      toast.error(`Save failed: ${getErrorMessage(err)}`);
+    } finally {
+      setSaving(false);
+    }
+  }, [songId, analysis, projectId, getSnapshot, setProjectName]);
+
+  const onSave = useCallback(() => {
+    if (!songId || !analysis) return;
+    if (projectName) {
+      void doSave(projectName);
+    } else {
+      setNameDraft(`Project ${new Date().toLocaleDateString()}`);
+      setShowNameInput(true);
+    }
+  }, [songId, analysis, projectName, doSave]);
+
+  const onNameSubmit = useCallback(() => {
+    const name = nameDraft.trim();
+    if (!name) return;
+    setShowNameInput(false);
+    void doSave(name);
+  }, [nameDraft, doSave]);
+
+  const onExport = async () => {
+    if (!songId || !audioUrl || !analysis) return;
+    const ready = clips
+      .filter((c) => c.status === "ready" && c.videoUrl)
+      .map((c) => ({ start: c.start, end: c.end, videoUrl: c.videoUrl as string }));
+    if (!ready.length) {
+      toast.warning("No clips ready to render yet");
+      return;
+    }
+    setRendering(true);
+    try {
+      const { url } = await renderTimeline({
+        projectId: songId,
+        audioUrl,
+        duration: analysis.duration,
+        clips: ready,
+        fades,
+      });
+      setRenderUrl(url);
+      toast.success("Render complete");
+    } catch (err) {
+      toast.error(`Render failed: ${getErrorMessage(err)}`);
+    } finally {
+      setRendering(false);
+    }
+  };
+
+  return (
+    <>
+      <header className="header">
+        <div className="title">
+          <span className="dot" />
+          <span>{projectName ?? (songId ? `song ${songId.slice(0, 8)}` : "Music Video Studio")}</span>
+          {songId && (
+            <span className="song-chip" title="loaded song — click × to swap">
+              <span className="song-name">{songFilename ?? `song ${songId.slice(0, 8)}`}</span>
+              <button
+                type="button"
+                className="song-chip-close"
+                onClick={onChangeSong}
+                aria-label="close song and upload a new one"
+                title="close & upload a new song"
+              >
+                ×
+              </button>
+            </span>
+          )}
+          {analysis && (
+            <span className="dim mono" style={{ marginLeft: 8 }}>
+              {analysis.bpm.toFixed(0)} BPM · {analysis.key} · {Math.floor(analysis.duration / 60)}:
+              {Math.floor(analysis.duration % 60).toString().padStart(2, "0")}
+            </span>
+          )}
+        </div>
+        <div className="actions">
+          <QueueStatus />
+          <button type="button" className="btn ghost" onClick={() => setShowLibrary(true)}>
+            Library
+          </button>
+          {(songId || analysis) && (
+            <button type="button" className="btn ghost" onClick={onNewProject} title="Discard and start fresh">
+              New
+            </button>
+          )}
+          {analysis && !showNameInput && (
+            <button type="button" className="btn" onClick={onSave} disabled={saving}>
+              {saving ? "Saving…" : "Save"}
+            </button>
+          )}
+          {showNameInput && (
+            <div className="save-name-inline">
+              <input
+                type="text"
+                className="save-name-input"
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") onNameSubmit();
+                  if (e.key === "Escape") setShowNameInput(false);
+                }}
+                placeholder="Project name…"
+                autoFocus
+              />
+              <button type="button" className="btn primary" onClick={onNameSubmit} disabled={!nameDraft.trim()}>
+                Save
+              </button>
+              <button type="button" className="btn ghost" onClick={() => setShowNameInput(false)}>
+                Cancel
+              </button>
+            </div>
+          )}
+          {analysis && (
+            <label className="checkbox-inline" title="Apply 150ms alpha fade-in/out at each clip's edges">
+              <input
+                type="checkbox"
+                checked={fades}
+                onChange={(e) => setFades(e.target.checked)}
+              />
+              <span>fades</span>
+            </label>
+          )}
+          {renderUrl && (
+            <a href={renderUrl} target="_blank" className="btn" rel="noreferrer">
+              View render
+            </a>
+          )}
+          <button type="button" className="btn primary" onClick={onExport} disabled={!analysis || rendering}>
+            {rendering ? "Rendering…" : "Export MP4"}
+          </button>
+        </div>
+      </header>
+      {showLibrary && <Library onClose={() => setShowLibrary(false)} />}
+    </>
+  );
+}

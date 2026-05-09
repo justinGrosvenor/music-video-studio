@@ -1,0 +1,393 @@
+import { useStore } from "./store.js";
+import {
+  startImageToVideo,
+  startVideoToVideo,
+  startLipSync,
+  startTextToImage,
+  startTextToVideo,
+  pollTask,
+  extractLastFrame,
+  sliceAudio,
+  ensureVocalStem,
+  ApiError,
+} from "./api.js";
+import { toast } from "./toast.js";
+import type { Clip, GenerationModel, Task } from "@mvs/shared";
+
+/** How many Runway generations to run in parallel. */
+export const MAX_CONCURRENT = 3;
+
+export type JobState = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+
+export type Job = {
+  id: string;
+  clipId: string;
+  state: JobState;
+  taskId: string | null;
+  error: string | null;
+  enqueuedAt: number;
+  startedAt: number | null;
+  completedAt: number | null;
+  /** Block until this job is resolved (succeeded / failed / cancelled). */
+  waitForJobId: string | null;
+  input: {
+    source: Clip["source"];
+    seedImageUrl: string;
+    /** For aleph (video-to-video): the existing clip's video URL. */
+    inputVideoUrl?: string;
+    /** For lipSync: identifies the song so we can fetch / cache the vocal stem. */
+    songId?: string;
+    audioUrl?: string;
+    avatarId?: string;
+    clipStart?: number;
+    clipEnd?: number;
+    prompt: string;
+    /** For generated: prompt for the text-to-image step. Falls back to `prompt`. */
+    imagePrompt?: string;
+    duration: number;
+    sectionLabel: string;
+    energy: number;
+    model?: GenerationModel;
+    /** For continue: analyze previous clip motion to enrich the prompt. */
+    continuity?: boolean;
+    /** For generated: lookbook URLs to pass as references to text-to-image. */
+    referenceImages?: string[];
+  };
+};
+
+export type EnqueueInput = {
+  clipId: string;
+  source: Clip["source"];
+  seedImageUrl: string;
+  inputVideoUrl?: string;
+  songId?: string;
+  audioUrl?: string;
+  avatarId?: string;
+  clipStart?: number;
+  clipEnd?: number;
+  prompt: string;
+  imagePrompt?: string;
+  duration: number;
+  sectionLabel: string;
+  energy: number;
+  model?: GenerationModel;
+  continuity?: boolean;
+  referenceImages?: string[];
+};
+
+const newJobId = () => `job-${crypto.randomUUID().slice(0, 8)}`;
+
+export function enqueueGeneration(input: EnqueueInput): string {
+  const existing = useStore.getState().jobs.filter(
+    (j) => j.clipId === input.clipId && (j.state === "queued" || j.state === "running")
+  );
+  for (const j of existing) cancelJob(j.id);
+
+  let waitForJobId: string | null = null;
+  if (input.source === "continue") {
+    const { clips, jobs } = useStore.getState();
+    const idx = clips.findIndex((c) => c.id === input.clipId);
+    if (idx > 0) {
+      const prev = clips[idx - 1]!;
+      const prevJob = jobs.find(
+        (j) => j.clipId === prev.id && (j.state === "queued" || j.state === "running")
+      );
+      if (prevJob) waitForJobId = prevJob.id;
+    }
+  }
+
+  const id = newJobId();
+  const job: Job = {
+    id,
+    clipId: input.clipId,
+    state: "queued",
+    taskId: null,
+    error: null,
+    enqueuedAt: Date.now(),
+    startedAt: null,
+    completedAt: null,
+    waitForJobId,
+    input: {
+      source: input.source,
+      seedImageUrl: input.seedImageUrl,
+      inputVideoUrl: input.inputVideoUrl,
+      songId: input.songId,
+      audioUrl: input.audioUrl,
+      avatarId: input.avatarId,
+      clipStart: input.clipStart,
+      clipEnd: input.clipEnd,
+      prompt: input.prompt,
+      imagePrompt: input.imagePrompt,
+      duration: input.duration,
+      sectionLabel: input.sectionLabel,
+      energy: input.energy,
+      model: input.model,
+      continuity: input.continuity,
+      referenceImages: input.referenceImages,
+    },
+  };
+  useStore.getState().setJobs((prev) => [...prev, job]);
+  useStore.getState().updateClip(input.clipId, {
+    status: "queued",
+    prompt: input.prompt,
+    lastError: undefined,
+  });
+  pump();
+  return id;
+}
+
+export function cancelJob(jobId: string): void {
+  const { jobs } = useStore.getState();
+  const job = jobs.find((j) => j.id === jobId);
+  if (!job) return;
+  if (job.state === "queued") {
+    useStore.getState().setJobs((prev) =>
+      prev.map((j) => (j.id === jobId ? { ...j, state: "cancelled", completedAt: Date.now() } : j))
+    );
+    useStore.getState().updateClip(job.clipId, { status: "empty" });
+  } else if (job.state === "running") {
+    useStore.getState().setJobs((prev) =>
+      prev.map((j) => (j.id === jobId ? { ...j, state: "cancelled" } : j))
+    );
+  }
+  pump();
+}
+
+export function queueStats(): { queued: number; running: number; total: number } {
+  const { jobs } = useStore.getState();
+  let queued = 0;
+  let running = 0;
+  for (const j of jobs) {
+    if (j.state === "queued") queued++;
+    else if (j.state === "running") running++;
+  }
+  return { queued, running, total: queued + running };
+}
+
+function isResolved(state: JobState): boolean {
+  return state === "succeeded" || state === "failed" || state === "cancelled";
+}
+
+function pump() {
+  const { jobs } = useStore.getState();
+  const running = jobs.filter((j) => j.state === "running").length;
+  const slots = MAX_CONCURRENT - running;
+  if (slots <= 0) return;
+
+  const eligible = jobs.filter((j) => {
+    if (j.state !== "queued") return false;
+    if (j.waitForJobId === null) return true;
+    const dep = jobs.find((d) => d.id === j.waitForJobId);
+    return !dep || isResolved(dep.state);
+  });
+
+  for (const job of eligible.slice(0, slots)) {
+    void run(job.id);
+  }
+}
+
+type ContinueResult = { seed: string };
+
+async function resolveContinue(job: Job): Promise<ContinueResult> {
+  const { clips } = useStore.getState();
+  const idx = clips.findIndex((c) => c.id === job.clipId);
+  if (idx <= 0) return { seed: job.input.seedImageUrl };
+  const prev = clips[idx - 1]!;
+  if (!prev.videoUrl) return { seed: job.input.seedImageUrl };
+
+  // Don't pass a time hint — extractLastFrame uses `-sseof -0.1` which seeks
+  // from the END of the actual video. Passing `prev.end - prev.start` (the
+  // timeline duration) breaks when the model clamped output to a shorter
+  // duration (e.g., Veo 3.1 caps at 8s but the timeline clip can be longer),
+  // because `-ss <past_eof>` produces zero frames and ffmpeg silently exits 0.
+  try {
+    const { url } = await extractLastFrame(prev.videoUrl);
+    return { seed: url };
+  } catch (err) {
+    console.warn("continue resolution failed; using fallback seed", err);
+    return { seed: job.input.seedImageUrl };
+  }
+}
+
+function isCancelled(jobId: string): boolean {
+  return useStore.getState().jobs.find((j) => j.id === jobId)?.state === "cancelled";
+}
+
+function setJobPatch(jobId: string, patch: Partial<Job>) {
+  useStore.getState().setJobs((prev) =>
+    prev.map((j) => (j.id === jobId ? { ...j, ...patch } : j))
+  );
+}
+
+/** Snap a freeform clip duration to a value the chosen model accepts. */
+function durationFor(model: GenerationModel, d: number): number {
+  switch (model) {
+    case "seedance2":
+      return Math.min(15, Math.max(5, Math.ceil(d)));
+    case "gen4_turbo":
+      return d > 8 ? 10 : d > 5 ? 8 : 5;
+    case "gen4.5":
+      return Math.min(10, Math.max(2, Math.ceil(d)));
+    case "veo3.1":
+    case "veo3.1_fast":
+      // Pick nearest of 4 / 6 / 8.
+      return [4, 6, 8].reduce((best, opt) =>
+        Math.abs(opt - d) < Math.abs(best - d) ? opt : best
+      );
+    default:
+      return 5;
+  }
+}
+
+/** Kick off the right Runway primitive for this job's source. */
+async function startTask(job: Job): Promise<{ id: string }> {
+  const model: GenerationModel = job.input.model ?? "seedance2";
+  const duration = durationFor(model, job.input.duration);
+  const promptText =
+    job.input.prompt ||
+    `${job.input.sectionLabel}, energy ${job.input.energy.toFixed(2)}, cinematic`;
+
+  if (job.input.source === "aleph") {
+    if (!job.input.inputVideoUrl) throw new Error("aleph requires an existing clip video");
+    return startVideoToVideo({
+      videoUri: job.input.inputVideoUrl,
+      promptText,
+      ratio: "1280:720",
+      // video-to-video accepts only seedance2 or gen4_aleph; map anything
+      // else to gen4_aleph as the default restyle path.
+      model: model === "seedance2" ? "seedance2" : "gen4_aleph",
+    });
+  }
+
+  if (job.input.source === "textToVideo") {
+    // text-to-video accepts gen4.5 / seedance2 / veo3.1 / veo3.1_fast / veo3;
+    // gen4_turbo (image-only) maps to gen4.5 here.
+    const ttvModel: "gen4.5" | "seedance2" | "veo3.1" | "veo3.1_fast" =
+      model === "seedance2" ? "seedance2"
+      : model === "veo3.1" ? "veo3.1"
+      : model === "veo3.1_fast" ? "veo3.1_fast"
+      : "gen4.5";
+    return startTextToVideo({
+      promptText,
+      model: ttvModel,
+      ratio: "1280:720",
+      duration: durationFor(ttvModel as GenerationModel, job.input.duration),
+    });
+  }
+
+  if (job.input.source === "lipSync") {
+    if (!job.input.songId || !job.input.audioUrl) {
+      throw new Error("lipSync requires a song to derive vocals from");
+    }
+    if (!job.input.avatarId) {
+      throw new Error("lipSync requires an avatar — upload a character image first");
+    }
+    if (job.input.clipStart === undefined || job.input.clipEnd === undefined) {
+      throw new Error("lipSync requires clip start/end");
+    }
+    const slice = await sliceAudio(job.input.audioUrl, job.input.clipStart, job.input.clipEnd);
+    const stem = await ensureVocalStem(job.clipId, slice.url);
+    return startLipSync({
+      avatarId: job.input.avatarId,
+      audioUri: stem.url,
+    });
+  }
+
+  // Default path: image-to-video. Used by `continue`, `archetype`, and
+  // `generated` (which first generates the seed image from text).
+  // (`actTwo` will need its own branch once we wire webcam recording.)
+  let seed = job.input.seedImageUrl;
+  const finalPrompt = promptText;
+  if (job.input.source === "continue") {
+    const cont = await resolveContinue(job);
+    seed = cont.seed;
+  } else if (job.input.source === "generated") {
+    seed = await generateSeedImage(job, promptText);
+  }
+  return startImageToVideo({
+    promptImage: seed,
+    promptText: finalPrompt,
+    ratio: "1280:720",
+    duration,
+    model,
+  });
+}
+
+/**
+ * For `generated` clips: text-to-image first, polled to completion, then the
+ * resulting image becomes the seed for the image-to-video step. Lookbook
+ * images (up to 3) are passed as references to keep style consistent across
+ * a project.
+ */
+async function generateSeedImage(job: Job, promptText: string): Promise<string> {
+  const refs = (job.input.referenceImages ?? []).slice(0, 3).map((uri) => ({ uri }));
+  const imagePrompt = job.input.imagePrompt?.trim() || promptText;
+  const { id } = await startTextToImage({
+    promptText: imagePrompt,
+    model: "gen4_image",
+    ratio: "1280:720",
+    ...(refs.length ? { referenceImages: refs } : {}),
+  });
+  const final = await pollTask(id);
+  if (final.status !== "SUCCEEDED" || !final.output?.[0]) {
+    const reason = final.error ?? `image-gen ${final.status.toLowerCase()}`;
+    throw new Error(`seed image failed: ${reason}`);
+  }
+  return final.output[0];
+}
+
+async function run(jobId: string): Promise<void> {
+  const startState = useStore.getState();
+  const job = startState.jobs.find((j) => j.id === jobId);
+  if (!job || job.state !== "queued") return;
+
+  setJobPatch(jobId, { state: "running", startedAt: Date.now() });
+  useStore.getState().updateClip(job.clipId, { status: "generating" });
+
+  try {
+    const task = await startTask(job);
+    setJobPatch(jobId, { taskId: task.id });
+    useStore.getState().updateClip(job.clipId, { generationTaskId: task.id });
+
+    if (isCancelled(jobId)) {
+      useStore.getState().updateClip(job.clipId, { status: "empty" });
+      return;
+    }
+
+    const final: Task = await pollTask(task.id);
+
+    if (isCancelled(jobId)) {
+      useStore.getState().updateClip(job.clipId, { status: "empty" });
+      return;
+    }
+
+    if (final.status === "SUCCEEDED" && final.output?.[0]) {
+      setJobPatch(jobId, { state: "succeeded", completedAt: Date.now() });
+      useStore.getState().updateClip(job.clipId, {
+        videoUrl: final.output[0],
+        status: "ready",
+        lastError: undefined,
+      });
+      toast.success(`Clip ready (${job.input.sectionLabel})`);
+    } else {
+      const reason = final.error ?? `task ended in ${final.status} with no output`;
+      setJobPatch(jobId, { state: "failed", error: reason, completedAt: Date.now() });
+      useStore.getState().updateClip(job.clipId, { status: "failed", lastError: reason });
+      toast.error(`Generation failed: ${reason.slice(0, 80)}`);
+    }
+  } catch (err) {
+    const isRateLimit = err instanceof ApiError && err.rateLimited;
+    const reason = isRateLimit
+      ? "Runway daily task limit reached — resets at midnight UTC"
+      : err instanceof Error ? err.message : String(err);
+    setJobPatch(jobId, { state: "failed", error: reason, completedAt: Date.now() });
+    useStore.getState().updateClip(job.clipId, { status: "failed", lastError: reason });
+    if (isRateLimit) {
+      toast.warning("Runway daily limit reached. Your quota resets at midnight UTC.", 8000);
+    } else {
+      toast.error(`Generation failed: ${reason.slice(0, 120)}`);
+    }
+  } finally {
+    pump();
+  }
+}
