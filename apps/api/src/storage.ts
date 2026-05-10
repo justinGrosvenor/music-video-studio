@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, writeFile, readFile, rename } from "node:fs/promises";
+import { mkdir, writeFile, readFile, rename, rm } from "node:fs/promises";
 import { existsSync, createReadStream } from "node:fs";
 import { join, extname } from "node:path";
 import { S3Client, PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
@@ -182,6 +182,12 @@ export async function readAnalysisError(songId: string): Promise<string | null> 
   const path = join(ANALYSES, `${songId}.error`);
   if (!existsSync(path)) return null;
   return readFile(path, "utf8");
+}
+
+export async function clearAnalysisError(songId: string): Promise<void> {
+  const path = join(ANALYSES, `${songId}.error`);
+  if (!existsSync(path)) return;
+  await rm(path, { force: true });
 }
 
 export async function readVocalStemUrl(songId: string): Promise<string | null> {

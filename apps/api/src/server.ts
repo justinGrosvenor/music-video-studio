@@ -10,6 +10,7 @@ import {
   readAnalysis,
   writeAnalysisError,
   readAnalysisError,
+  clearAnalysisError,
   CorruptAnalysisError,
 } from "./storage.js";
 import { analyzeFromUrl } from "./audio.js";
@@ -117,6 +118,12 @@ app.post("/api/songs/upload", async (req, reply) => {
     return reply.code(400).send({ error: "file content is not a recognized audio format" });
   }
   const { id, publicUrl } = await saveUpload(buf, file.filename, file.mimetype);
+
+  // Song ids are content-addressed (sha256 over the bytes), so re-uploading
+  // the same file after a transient Modal failure hits a stale `${id}.error`
+  // and the client gives up immediately. Wipe any prior error before kicking
+  // off a fresh analysis run.
+  await clearAnalysisError(id);
 
   // Kick off analysis async; client polls /api/songs/:id/analysis.
   analyzeFromUrl(id, publicUrl).catch(async (err) => {
@@ -252,13 +259,16 @@ app.post("/api/audio/slice", async (req, reply) => {
 // Vocal stem (voice isolation) -----------------------------------------
 
 const VocalStemBody = z.object({
-  songId: z.string(),
+  // songId is accepted for back-compat with older clients but ignored —
+  // the cache key is now derived from the audio URL hash so per-region
+  // slices can't share a stem with the full song or with each other.
+  songId: z.string().optional(),
   audioUrl: z.string().url(),
 });
 
 app.post("/api/songs/vocal-stem", async (req, reply) => {
   const body = VocalStemBody.parse(req.body);
-  const result = await ensureVocalStem(body.songId, body.audioUrl);
+  const result = await ensureVocalStem(body.audioUrl);
   return reply.send(result);
 });
 

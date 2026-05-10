@@ -1,17 +1,29 @@
+import { createHash } from "node:crypto";
 import { voiceIsolation, getTask } from "./runway.js";
 import { readVocalStemUrl, writeVocalStemUrl } from "./storage.js";
 import { pollUntil } from "./poll.js";
 
 const inflight = new Map<string, Promise<{ url: string; cached: boolean }>>();
 
+/**
+ * Cache key for the vocal stem. Derived from the audio URL itself so:
+ *   - the full-song case (audioUrl = stable song URL) caches per song;
+ *   - the per-region case (audioUrl = content-addressed slice URL) caches
+ *     per region content. Boundary drags re-slice → new URL → new key,
+ *     so we don't reuse a stale stem from a previous region.
+ */
+function cacheKeyFor(audioUrl: string): string {
+  return createHash("sha256").update(audioUrl).digest("hex").slice(0, 16);
+}
+
 export async function ensureVocalStem(
-  songId: string,
   audioUrl: string
 ): Promise<{ url: string; cached: boolean }> {
-  const cached = await readVocalStemUrl(songId);
+  const key = cacheKeyFor(audioUrl);
+  const cached = await readVocalStemUrl(key);
   if (cached) return { url: cached, cached: true };
 
-  const existing = inflight.get(songId);
+  const existing = inflight.get(key);
   if (existing) return existing;
 
   const promise = (async () => {
@@ -22,15 +34,15 @@ export async function ensureVocalStem(
       throw new Error(`voice isolation ${result.status}: ${failure}`);
     }
     const url = result.output[0];
-    await writeVocalStemUrl(songId, url);
+    await writeVocalStemUrl(key, url);
     return { url, cached: false };
   })();
 
-  inflight.set(songId, promise);
+  inflight.set(key, promise);
   try {
     return await promise;
   } finally {
-    inflight.delete(songId);
+    inflight.delete(key);
   }
 }
 

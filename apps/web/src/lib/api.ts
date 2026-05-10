@@ -69,12 +69,12 @@ export async function sliceAudio(audioUrl: string, start: number, end: number): 
   );
 }
 
-export async function ensureVocalStem(songId: string, audioUrl: string): Promise<{ url: string; cached: boolean }> {
+export async function ensureVocalStem(audioUrl: string): Promise<{ url: string; cached: boolean }> {
   return jsonOrThrow(
     await fetch("/api/songs/vocal-stem", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ songId, audioUrl }),
+      body: JSON.stringify({ audioUrl }),
     })
   );
 }

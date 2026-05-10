@@ -83,10 +83,19 @@ export function Header() {
       toast.warning("No clips ready to render yet");
       return;
     }
+    // Use the project's own id as the render filename — using songId here
+    // collides whenever two distinct projects are built from the same track.
+    // Mint a project id on first export if none exists yet (same pattern as
+    // doSave) so the result lives at /storage/renders/<projectId>.mp4.
+    let renderId = projectId;
+    if (!renderId) {
+      renderId = `proj-${crypto.randomUUID().slice(0, 8)}`;
+      useStore.setState({ projectId: renderId });
+    }
     setRendering(true);
     try {
       const { url } = await renderTimeline({
-        projectId: songId,
+        projectId: renderId,
         audioUrl,
         duration: analysis.duration,
         clips: ready,

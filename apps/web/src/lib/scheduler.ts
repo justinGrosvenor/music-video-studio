@@ -307,7 +307,9 @@ async function startTask(job: Job): Promise<{ id: string }> {
       throw new Error("lipSync requires clip start/end");
     }
     const slice = await sliceAudio(job.input.audioUrl, job.input.clipStart, job.input.clipEnd);
-    const stem = await ensureVocalStem(job.clipId, slice.url);
+    // Cache key is derived from `slice.url` (content-addressed) inside
+    // ensureVocalStem, so a boundary drag → new slice → new key → fresh stem.
+    const stem = await ensureVocalStem(slice.url);
     return startLipSync({
       avatarId: job.input.avatarId,
       audioUri: stem.url,
