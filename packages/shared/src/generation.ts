@@ -90,6 +90,8 @@ export const TextToImageModel = z.enum([
   "gen4_image",
   "gen4_image_turbo",
   "gemini_2.5_flash",
+  "gemini_image3_pro",
+  "gpt_image_2",
 ]);
 export type TextToImageModel = z.infer<typeof TextToImageModel>;
 
@@ -111,7 +113,7 @@ export const TextToImageRatio = z.enum([
   "960:720",
   "720:960",
   "1680:720",
-  // gemini_2.5_flash (extras not shared with gen4)
+  // gemini_2.5_flash / gemini_image3_pro shared
   "1344:768",
   "768:1344",
   "1184:864",
@@ -121,17 +123,78 @@ export const TextToImageRatio = z.enum([
   "1248:832",
   "896:1152",
   "1152:896",
+  // gemini_image3_pro high-res extras
+  "2048:2048",
+  "1696:2528",
+  "2528:1696",
+  "1792:2400",
+  "2400:1792",
+  "1856:2304",
+  "2304:1856",
+  "1536:2752",
+  "2752:1536",
+  "3168:1344",
+  "4096:4096",
+  "3392:5056",
+  "5056:3392",
+  "3584:4800",
+  "4800:3584",
+  "3712:4608",
+  "4608:3712",
+  "3072:5504",
+  "5504:3072",
+  "6336:2688",
+  // gpt_image_2
+  "2048:880",
+  "1920:1088",
+  "1920:1280",
+  "1920:1440",
+  "1920:1536",
+  "1920:1920",
+  "1536:1920",
+  "1440:1920",
+  "1280:1920",
+  "1088:1920",
+  "2912:1248",
+  "2560:1440",
+  "2560:1712",
+  "2560:1920",
+  "2560:2048",
+  "2560:2560",
+  "2048:2560",
+  "1920:2560",
+  "1712:2560",
+  "1440:2560",
+  "3840:1648",
+  "3840:2160",
+  "3504:2336",
+  "3264:2448",
+  "3200:2560",
+  "2880:2880",
+  "2560:3200",
+  "2448:3264",
+  "2336:3504",
+  "2160:3840",
+  "auto",
 ]);
 export type TextToImageRatio = z.infer<typeof TextToImageRatio>;
 
+export const TextToImageRefImage = z.object({
+  uri: z.string().url(),
+  tag: z.string().optional(),
+  subject: z.enum(["object", "human"]).optional(),
+});
+
 export const TextToImageRequest = z.object({
-  promptText: z.string().min(1).max(1000),
+  promptText: z.string().min(1).max(32000),
   ratio: TextToImageRatio.default("1920:1080"),
   referenceImages: z
-    .array(z.object({ uri: z.string().url(), tag: z.string().optional() }))
-    .max(3)
+    .array(TextToImageRefImage)
+    .max(16)
     .optional(),
   model: TextToImageModel.default("gen4_image"),
+  quality: z.enum(["low", "medium", "high", "auto"]).optional(),
+  outputCount: z.number().int().min(1).max(10).optional(),
 });
 export type TextToImageRequest = z.infer<typeof TextToImageRequest>;
 

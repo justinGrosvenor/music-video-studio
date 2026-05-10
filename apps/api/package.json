@@ -15,7 +15,7 @@
     "@fastify/rate-limit": "^10.0.0",
     "@fastify/multipart": "^9.0.1",
     "@fastify/static": "^8.0.2",
-    "@runwayml/sdk": "^3.20.0",
+    "@runwayml/sdk": "^3.21.0",
     "@mvs/shared": "workspace:*",
     "fastify": "^5.1.0",
     "sharp": "^0.34.5",

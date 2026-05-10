@@ -16,7 +16,9 @@ import { getErrorMessage, type TextToImageModel, type TextToImageRatio } from "@
 const TEXT_TO_IMAGE_MODELS: { value: TextToImageModel; label: string; hint: string }[] = [
   { value: "gen4_image", label: "Gen-4 Image", hint: "high quality, references optional" },
   { value: "gen4_image_turbo", label: "Gen-4 Turbo", hint: "fast, cheaper, references required" },
-  { value: "gemini_2.5_flash", label: "Nano Banana", hint: "Google Gemini 2.5 Flash, references optional" },
+  { value: "gpt_image_2", label: "GPT Image 2", hint: "OpenAI · up to 4K · 32K char prompts" },
+  { value: "gemini_image3_pro", label: "Imagen 3 Pro", hint: "Google · up to 4K+ · character consistency" },
+  { value: "gemini_2.5_flash", label: "Gemini Flash", hint: "Google Gemini 2.5 Flash, fast" },
 ];
 
 // Per-model ratio sets — Runway rejects mismatches, so we constrain in the UI.
@@ -25,13 +27,33 @@ const GEN4_RATIOS: TextToImageRatio[] = [
   "1360:768", "1168:880", "1440:1080", "1080:1440", "1808:768", "2112:912",
   "720:720", "960:720", "720:960", "1680:720",
 ];
-const GEMINI_RATIOS: TextToImageRatio[] = [
+const GEMINI_FLASH_RATIOS: TextToImageRatio[] = [
   "1024:1024", "1344:768", "768:1344", "1184:864", "864:1184",
   "1536:672", "832:1248", "1248:832", "896:1152", "1152:896",
 ];
+const GEMINI_PRO_RATIOS: TextToImageRatio[] = [
+  "1024:1024", "1344:768", "768:1344", "1184:864", "864:1184",
+  "1536:672", "832:1248", "1248:832", "896:1152", "1152:896",
+  "2048:2048", "2528:1696", "1696:2528", "2400:1792", "1792:2400",
+  "2304:1856", "1856:2304", "2752:1536", "1536:2752", "3168:1344",
+  "4096:4096",
+];
+const GPT_IMAGE_RATIOS: TextToImageRatio[] = [
+  "auto",
+  "1920:1080", "1920:1920", "1080:1920",
+  "2560:1440", "2560:2560", "1440:2560",
+  "3840:2160", "2880:2880", "2160:3840",
+  "1920:1280", "1280:1920", "1920:1440", "1440:1920",
+  "2560:1712", "1712:2560", "2560:1920", "1920:2560",
+];
 
 function ratiosFor(model: TextToImageModel): TextToImageRatio[] {
-  return model === "gemini_2.5_flash" ? GEMINI_RATIOS : GEN4_RATIOS;
+  switch (model) {
+    case "gemini_2.5_flash": return GEMINI_FLASH_RATIOS;
+    case "gemini_image3_pro": return GEMINI_PRO_RATIOS;
+    case "gpt_image_2": return GPT_IMAGE_RATIOS;
+    default: return GEN4_RATIOS;
+  }
 }
 
 const LOOKBOOK_MAX = 6;
@@ -358,6 +380,7 @@ function ImageGenerator({
   const turboNeedsRefs = model === "gen4_image_turbo";
   const refsAvailable = lookbook.length > 0;
   const effectiveUseRefs = useRefs || turboNeedsRefs;
+  const maxRefs = model === "gpt_image_2" ? 16 : model === "gemini_image3_pro" ? 14 : 3;
   const canGenerate =
     !busy &&
     prompt.trim().length > 0 &&
@@ -370,7 +393,7 @@ function ImageGenerator({
     setProgressLabel("queued");
     try {
       const referenceImages = effectiveUseRefs && refsAvailable
-        ? lookbook.slice(0, 3).map((uri) => ({ uri }))
+        ? lookbook.slice(0, maxRefs).map((uri) => ({ uri }))
         : undefined;
       const { id } = await startTextToImage({
         promptText: prompt.trim(),
@@ -412,7 +435,7 @@ function ImageGenerator({
       setBusy(false);
       setProgressLabel(null);
     }
-  }, [canGenerate, effectiveUseRefs, refsAvailable, lookbook, prompt, model, ratio, onDone]);
+  }, [canGenerate, effectiveUseRefs, refsAvailable, lookbook, prompt, model, ratio, maxRefs, onDone]);
 
   return (
     <div className="image-generator">
@@ -458,7 +481,7 @@ function ImageGenerator({
           {turboNeedsRefs && <span className="dim"> (required for Turbo)</span>}
           {!refsAvailable && <span className="dim"> (no images yet)</span>}
           {refsAvailable && effectiveUseRefs && (
-            <span className="dim"> ({Math.min(3, lookbook.length)} sent)</span>
+            <span className="dim"> ({Math.min(maxRefs, lookbook.length)} sent)</span>
           )}
         </span>
       </label>

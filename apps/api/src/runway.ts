@@ -95,12 +95,12 @@ export async function imageToVideo(req: ImageToVideoRequest): Promise<RunwayTask
         ? await buildBridgePrompt()
         : [{ uri: await toRunwayUri(req.promptImage), position: "first" as const }];
       const task = await runway.imageToVideo.create({
-        model: "seedance2",
+        model: "seedance2" as "gen4_turbo",
         promptImage,
         promptText: req.promptText,
         ratio: "1280:720",
         duration: req.duration,
-      });
+      } as any);
       return { id: task.id };
     }
     if (req.model === "veo3.1" || req.model === "veo3.1_fast") {
@@ -174,11 +174,9 @@ export async function textToVideo(req: TextToVideoRequest): Promise<RunwayTask> 
       const task = await runway.textToVideo.create({
         model: "seedance2",
         promptText: req.promptText,
-        // Seedance has its own ratio set; the UI restricts to 1280:720 today
-        // so the cast is safe. If the picker exposes more, validate per-model.
         ratio: req.ratio as "1280:720",
         duration: req.duration,
-      });
+      } as any);
       return { id: task.id };
     }
     if (req.model === "gen4.5") {
@@ -219,7 +217,7 @@ export async function videoToVideo(req: VideoToVideoRequest): Promise<RunwayTask
         promptVideo: videoUri,
         promptText: req.promptText,
         ratio: "1280:720",
-      });
+      } as any);
       return { id: task.id };
     }
     const task = await runway.videoToVideo.create({
@@ -239,10 +237,9 @@ export async function textToImage(req: TextToImageRequest): Promise<RunwayTask> 
       (req.referenceImages ?? []).map(async (r) => ({
         uri: await toRunwayUri(r.uri),
         ...(r.tag ? { tag: r.tag } : {}),
+        ...(r.subject ? { subject: r.subject } : {}),
       }))
     );
-    // Each model has its own ratio enum and reference-image rules; narrow
-    // explicitly so the SDK's discriminated union accepts our params.
     if (req.model === "gen4_image_turbo") {
       if (refs.length === 0) {
         throw new Error("gen4_image_turbo requires at least one reference image");
@@ -250,8 +247,29 @@ export async function textToImage(req: TextToImageRequest): Promise<RunwayTask> 
       const task = await runway.textToImage.create({
         model: "gen4_image_turbo",
         promptText: req.promptText,
-        ratio: req.ratio as "1280:720", // see ratio comment in shared/generation.ts
+        ratio: req.ratio as "1280:720",
         referenceImages: refs,
+      });
+      return { id: task.id };
+    }
+    if (req.model === "gpt_image_2") {
+      const task = await runway.textToImage.create({
+        model: "gpt_image_2",
+        promptText: req.promptText,
+        ratio: req.ratio as "auto",
+        ...(refs.length ? { referenceImages: refs } : {}),
+        ...(req.quality ? { quality: req.quality } : {}),
+        ...(req.outputCount ? { outputCount: req.outputCount } : {}),
+      });
+      return { id: task.id };
+    }
+    if (req.model === "gemini_image3_pro") {
+      const task = await runway.textToImage.create({
+        model: "gemini_image3_pro",
+        promptText: req.promptText,
+        ratio: req.ratio as "1024:1024",
+        ...(refs.length ? { referenceImages: refs as any } : {}),
+        ...(req.outputCount ? { outputCount: req.outputCount as 1 | 4 } : {}),
       });
       return { id: task.id };
     }

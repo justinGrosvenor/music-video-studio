@@ -33,8 +33,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
       '@runwayml/sdk':
-        specifier: ^3.20.0
-        version: 3.20.0
+        specifier: ^3.21.0
+        version: 3.21.0
       fastify:
         specifier: ^5.1.0
         version: 5.8.5
@@ -1026,8 +1026,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@runwayml/sdk@3.20.0':
-    resolution: {integrity: sha512-5jkkklPeETrcdRGjknY/X8OVAb6jCEdpDV+/eXMtH7Am+sWQmFuqeh0nXVgtAYg3Wn89uFSLpFc612Y3wl4oog==}
+  '@runwayml/sdk@3.21.0':
+    resolution: {integrity: sha512-af7TvNIjdYOE/zpBE1Qk8o3HzEd4A0OHUZBGCAca/jNN5T+KY2wX7UC3ZjZEEjXXlX6v+9GNHIMpAlplku5OGg==}
     hasBin: true
 
   '@smithy/chunked-blob-reader-native@4.2.3':
@@ -2787,7 +2787,7 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.60.2':
     optional: true
 
-  '@runwayml/sdk@3.20.0': {}
+  '@runwayml/sdk@3.21.0': {}
 
   '@smithy/chunked-blob-reader-native@4.2.3':
     dependencies:
