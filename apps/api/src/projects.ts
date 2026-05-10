@@ -36,7 +36,7 @@ export async function saveProject(
     copiedFiles.set(url, `${config.PUBLIC_BASE_URL}/storage/projects/${id}/files/${filename}`);
   }
 
-  const rewritten = JSON.parse(JSON.stringify(state)) as Record<string, unknown>;
+  const rewritten = JSON.parse(JSON.stringify(state)) as JsonMutable;
   rewriteUrls(rewritten, copiedFiles);
 
   let thumbnailUrl: string | null = null;
@@ -48,7 +48,7 @@ export async function saveProject(
 
   const savedAt = new Date().toISOString();
   const meta: ProjectMeta = { id, name, savedAt, thumbnailUrl };
-  const saved: SavedProject = { ...meta, state: rewritten, files: [...copiedFiles.values()] };
+  const saved: SavedProject = { ...meta, state: rewritten as Record<string, unknown>, files: [...copiedFiles.values()] };
 
   await writeFile(join(dir, "project.json"), JSON.stringify(saved, null, 2));
   return meta;
@@ -108,6 +108,14 @@ export async function listRenders(): Promise<Array<{ name: string; url: string; 
   return renders;
 }
 
+type JsonMutable =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonMutable[]
+  | { [key: string]: JsonMutable };
+
 function collectUrls(obj: unknown, urls = new Set<string>()): Set<string> {
   if (typeof obj === "string" && (obj.startsWith("http://") || obj.startsWith("https://"))) {
     urls.add(obj);
@@ -119,21 +127,23 @@ function collectUrls(obj: unknown, urls = new Set<string>()): Set<string> {
   return urls;
 }
 
-function rewriteUrls(obj: any, map: Map<string, string>) {
+function rewriteUrls(obj: JsonMutable, map: Map<string, string>): void {
   if (Array.isArray(obj)) {
     for (let i = 0; i < obj.length; i++) {
-      if (typeof obj[i] === "string" && map.has(obj[i])) {
-        obj[i] = map.get(obj[i]);
+      const v = obj[i]!;
+      if (typeof v === "string" && map.has(v)) {
+        obj[i] = map.get(v)!;
       } else {
-        rewriteUrls(obj[i], map);
+        rewriteUrls(v, map);
       }
     }
   } else if (obj && typeof obj === "object") {
     for (const key of Object.keys(obj)) {
-      if (typeof obj[key] === "string" && map.has(obj[key])) {
-        obj[key] = map.get(obj[key]);
+      const v = obj[key]!;
+      if (typeof v === "string" && map.has(v)) {
+        obj[key] = map.get(v)!;
       } else {
-        rewriteUrls(obj[key], map);
+        rewriteUrls(v, map);
       }
     }
   }

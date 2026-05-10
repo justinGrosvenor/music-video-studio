@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import rateLimit from "@fastify/rate-limit";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import { z } from "zod";
@@ -42,12 +43,19 @@ import {
   TextToVideoRequest,
 } from "@mvs/shared";
 
+const SafeId = z
+  .string()
+  .min(1)
+  .max(100)
+  .regex(/^[a-zA-Z0-9_-]+$/, "id contains invalid characters");
+
 const app = Fastify({
   logger: { level: "info" },
   bodyLimit: 50 * 1024 * 1024,
 });
 
 await app.register(cors, { origin: config.WEB_ORIGIN, credentials: true });
+await app.register(rateLimit, { max: 200, timeWindow: "1 minute" });
 await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } });
 await app.register(fastifyStatic, {
   root: join(process.cwd(), config.STORAGE_DIR),
@@ -107,7 +115,7 @@ function sniffMatches(buf: Buffer, family: "audio" | "image"): boolean {
 
 // Songs ----------------------------------------------------------------
 
-app.post("/api/songs/upload", async (req, reply) => {
+app.post("/api/songs/upload", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (req, reply) => {
   const file = await req.file();
   if (!file) return reply.code(400).send({ error: "no file" });
   if (!file.mimetype?.startsWith("audio/")) {
@@ -134,7 +142,7 @@ app.post("/api/songs/upload", async (req, reply) => {
   return reply.send({ id, audioUrl: publicUrl, filename: file.filename });
 });
 
-app.post("/api/images/upload", async (req, reply) => {
+app.post("/api/images/upload", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (req, reply) => {
   const file = await req.file();
   if (!file) return reply.code(400).send({ error: "no file" });
   if (!file.mimetype?.startsWith("image/")) {
@@ -149,7 +157,7 @@ app.post("/api/images/upload", async (req, reply) => {
 });
 
 app.get("/api/songs/:id/analysis", async (req, reply) => {
-  const params = z.object({ id: z.string() }).parse(req.params);
+  const params = z.object({ id: SafeId }).parse(req.params);
   let analysis;
   try {
     analysis = await readAnalysis(params.id);
@@ -168,23 +176,23 @@ app.get("/api/songs/:id/analysis", async (req, reply) => {
 
 // Generation primitives ------------------------------------------------
 
-app.post("/api/generate/image-to-video", async (req, reply) => {
+app.post("/api/generate/image-to-video", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (req, reply) => {
   return reply.send(await imageToVideo(ImageToVideoRequest.parse(req.body)));
 });
 
-app.post("/api/generate/video-to-video", async (req, reply) => {
+app.post("/api/generate/video-to-video", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (req, reply) => {
   return reply.send(await videoToVideo(VideoToVideoRequest.parse(req.body)));
 });
 
-app.post("/api/generate/lip-sync", async (req, reply) => {
+app.post("/api/generate/lip-sync", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (req, reply) => {
   return reply.send(await lipSync(LipSyncRequest.parse(req.body)));
 });
 
-app.post("/api/generate/text-to-image", async (req, reply) => {
+app.post("/api/generate/text-to-image", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (req, reply) => {
   return reply.send(await textToImage(TextToImageRequest.parse(req.body)));
 });
 
-app.post("/api/generate/text-to-video", async (req, reply) => {
+app.post("/api/generate/text-to-video", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (req, reply) => {
   return reply.send(await textToVideo(TextToVideoRequest.parse(req.body)));
 });
 
@@ -209,7 +217,7 @@ app.post("/api/avatars/create", async (req, reply) => {
 // Tasks ----------------------------------------------------------------
 
 app.get("/api/tasks/:id", async (req, reply) => {
-  const params = z.object({ id: z.string() }).parse(req.params);
+  const params = z.object({ id: SafeId }).parse(req.params);
   const raw = await getTask(params.id);
   const task: Record<string, unknown> = {
     id: raw.id,
@@ -224,7 +232,7 @@ app.get("/api/tasks/:id", async (req, reply) => {
 });
 
 app.delete("/api/tasks/:id", async (req, reply) => {
-  const params = z.object({ id: z.string() }).parse(req.params);
+  const params = z.object({ id: SafeId }).parse(req.params);
   await deleteTask(params.id);
   return reply.send({ ok: true });
 });
@@ -281,7 +289,7 @@ const MAX_RENDER_CLIPS = 500;
 
 const RenderBody = z
   .object({
-    projectId: z.string().min(1),
+    projectId: SafeId,
     audioUrl: z.string().url(),
     duration: z.number().finite().positive().max(MAX_RENDER_DURATION_S),
     clips: z
@@ -303,7 +311,7 @@ const RenderBody = z
     message: "clip extends past project duration",
   });
 
-app.post("/api/render", async (req, reply) => {
+app.post("/api/render", { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } }, async (req, reply) => {
   const body = RenderBody.parse(req.body);
   await writeRenderManifest(body.projectId, body);
   const result = await renderTimeline(body);
@@ -311,7 +319,7 @@ app.post("/api/render", async (req, reply) => {
 });
 
 app.get("/api/render/:projectId", async (req, reply) => {
-  const params = z.object({ projectId: z.string() }).parse(req.params);
+  const params = z.object({ projectId: SafeId }).parse(req.params);
   // Only the local backend knows about local files; S3 callers should track
   // the URL returned from POST /api/render themselves.
   if (renderExists(params.projectId)) {
@@ -325,7 +333,7 @@ app.get("/api/render/:projectId", async (req, reply) => {
 // Projects / Library ----------------------------------------------------
 
 const SaveProjectBody = z.object({
-  id: z.string().min(1),
+  id: SafeId,
   name: z.string().min(1).max(200),
   state: z.record(z.unknown()),
 });
@@ -342,14 +350,14 @@ app.post("/api/projects/save", async (req, reply) => {
 });
 
 app.get("/api/projects/:id", async (req, reply) => {
-  const params = z.object({ id: z.string() }).parse(req.params);
+  const params = z.object({ id: SafeId }).parse(req.params);
   const project = await loadProject(params.id);
   if (!project) return reply.code(404).send({ error: "not found" });
   return reply.send(project);
 });
 
 app.delete("/api/projects/:id", async (req, reply) => {
-  const params = z.object({ id: z.string() }).parse(req.params);
+  const params = z.object({ id: SafeId }).parse(req.params);
   const deleted = await deleteProject(params.id);
   if (!deleted) return reply.code(404).send({ error: "not found" });
   return reply.send({ ok: true });
@@ -363,7 +371,7 @@ app.get("/api/library/renders", async (_req, reply) => {
 // Clip Library ------------------------------------------------------------
 
 const SaveClipBody = z.object({
-  id: z.string().min(1),
+  id: SafeId,
   name: z.string().min(1).max(200),
   videoUrl: z.string().url(),
   source: z.string(),
@@ -384,7 +392,7 @@ app.post("/api/clips/save", async (req, reply) => {
 });
 
 app.delete("/api/clips/:id", async (req, reply) => {
-  const params = z.object({ id: z.string() }).parse(req.params);
+  const params = z.object({ id: SafeId }).parse(req.params);
   const deleted = await deleteClip(params.id);
   if (!deleted) return reply.code(404).send({ error: "not found" });
   return reply.send({ ok: true });
@@ -394,7 +402,7 @@ app.delete("/api/clips/:id", async (req, reply) => {
 // Namespaced under /api/library to avoid clashing with /api/images/upload.
 
 const SaveImageBody = z.object({
-  id: z.string().min(1),
+  id: SafeId,
   name: z.string().min(1).max(200),
   url: z.string().url(),
   source: z.string(),
@@ -414,7 +422,7 @@ app.post("/api/library/images/save", async (req, reply) => {
 });
 
 app.delete("/api/library/images/:id", async (req, reply) => {
-  const params = z.object({ id: z.string() }).parse(req.params);
+  const params = z.object({ id: SafeId }).parse(req.params);
   const deleted = await deleteImage(params.id);
   if (!deleted) return reply.code(404).send({ error: "not found" });
   return reply.send({ ok: true });

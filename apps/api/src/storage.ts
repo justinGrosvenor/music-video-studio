@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile, readFile, rename, rm } from "node:fs/promises";
-import { existsSync, createReadStream } from "node:fs";
+import { existsSync } from "node:fs";
 import { join, extname } from "node:path";
 import { S3Client, PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { AudioAnalysis } from "@mvs/shared";
@@ -58,7 +58,11 @@ class LocalBackend implements StorageBackend {
     const ext = extname(originalName) || ".bin";
     const filename = `${id}${ext}`;
     const path = join(UPLOADS, filename);
-    if (!existsSync(path)) await writeFile(path, buf);
+    try {
+      await writeFile(path, buf, { flag: "wx" });
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    }
     return {
       id,
       publicUrl: `${config.PUBLIC_BASE_URL}/storage/uploads/${filename}`,
@@ -121,7 +125,7 @@ class S3Backend implements StorageBackend {
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: objectKey,
-        Body: createReadStream(localPath),
+        Body: await readFile(localPath),
         ContentType: contentType ?? mimeType(ext),
         CacheControl: "public, max-age=31536000, immutable",
       })

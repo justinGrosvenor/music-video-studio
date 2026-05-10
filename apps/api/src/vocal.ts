@@ -3,6 +3,8 @@ import { voiceIsolation, getTask } from "./runway.js";
 import { readVocalStemUrl, writeVocalStemUrl } from "./storage.js";
 import { pollUntil } from "./poll.js";
 
+// Process-local dedup — concurrent requests for the same audio share one
+// Runway task. Does not deduplicate across processes/containers.
 const inflight = new Map<string, Promise<{ url: string; cached: boolean }>>();
 
 /**

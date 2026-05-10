@@ -43,8 +43,6 @@ export function Timeline() {
   const zoom = useStore((s) => s.zoom);
   const setZoom = useStore((s) => s.setZoom);
   const zoomFit = useStore((s) => s.zoomFit);
-  const moveBoundary = useStore((s) => s.moveBoundary);
-
   const tracksRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -143,7 +141,7 @@ export function Timeline() {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [pxPerSec, moveBoundary]);
+  }, [pxPerSec]);
 
   const onBoundaryDown = (rightClipId: string, e: React.MouseEvent) => {
     e.stopPropagation();

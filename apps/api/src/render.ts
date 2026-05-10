@@ -34,6 +34,12 @@ export async function renderTimeline(req: RenderRequest): Promise<{ url: string 
   const outputName = `${req.projectId}.mp4`;
   const outputPath = join(paths.RENDERS, outputName);
 
+  if (req.clips.length > 50) {
+    console.warn(
+      `render: ${req.clips.length} clips — overlay chain may be slow`
+    );
+  }
+
   // Probe each source video so we can time-stretch it into its timeline slot.
   // Without this, sources shorter than their slot freeze on the last frame and
   // sources longer than their slot get cut mid-motion (the "catch-up" feel).
