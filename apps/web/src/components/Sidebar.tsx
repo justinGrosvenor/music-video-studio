@@ -310,7 +310,7 @@ function checkCanGenerate(
     if (!ctx.avatarId) {
       if (ctx.avatarStatus === "creating") return { ok: false, reason: "Avatar is being created — hang tight…" };
       if (ctx.avatarStatus === "failed") return { ok: false, reason: "Avatar creation failed — try re-uploading the character image" };
-      return { ok: false, reason: "Upload a character image first (Cast panel)" };
+      return { ok: false, reason: "Upload a character image first (Character panel)" };
     }
     if (!ctx.songId || !ctx.audioUrl) return { ok: false, reason: "Lip-Sync needs a loaded song" };
     return { ok: true };

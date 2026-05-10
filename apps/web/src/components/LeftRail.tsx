@@ -99,7 +99,7 @@ export function LeftRail() {
     <aside className="left">
       <div className="section">
         <div className="section-header">
-          <span className="label">Cast</span>
+          <span className="label">Character</span>
           {(character || hasAvatar) && (
             <button type="button" className="add" onClick={onClear}>clear</button>
           )}
