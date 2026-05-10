@@ -47,6 +47,7 @@ export function Timeline() {
   const splitAtPlayhead = useStore((s) => s.splitAtPlayhead);
   const mergeWithRight = useStore((s) => s.mergeWithRight);
   const splitPreviewTime = useStore((s) => s.splitPreviewTime);
+  const updateClip = useStore((s) => s.updateClip);
   const tracksRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -324,6 +325,20 @@ export function Timeline() {
                           muted
                           preload="metadata"
                         />
+                      )}
+                      {c.status !== "empty" && (
+                        <span
+                          className="clip-clear"
+                          role="button"
+                          tabIndex={-1}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            updateClip(c.id, { status: "empty", videoUrl: undefined, generationTaskId: undefined, lastError: undefined } as any);
+                          }}
+                          title="Clear clip"
+                        >
+                          ×
+                        </span>
                       )}
                       <span className="clip-label">
                         <ClipLabel status={c.status} source={c.source} />

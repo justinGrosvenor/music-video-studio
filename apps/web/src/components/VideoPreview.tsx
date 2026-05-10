@@ -79,9 +79,10 @@ export function VideoPreview() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, next, frontSlot, slotEl, loadInto, isPlaying]);
 
-  // Keep the front video synced to the playhead during scrubbing/playback.
+  // Sync video to playhead only when scrubbing (paused). During playback the
+  // video runs on its own clock — constant seeking causes jitter.
   useEffect(() => {
-    if (!active) return;
+    if (!active || isPlaying) return;
     const front = slotEl(frontSlot);
     if (!front) return;
     if (front.readyState >= 1) {
@@ -90,7 +91,7 @@ export function VideoPreview() {
       const doSeek = () => seekTo(front, active, playhead);
       front.addEventListener("loadedmetadata", doSeek, { once: true });
     }
-  }, [playhead, active, frontSlot, slotEl]);
+  }, [playhead, active, frontSlot, slotEl, isPlaying]);
 
   // Play/pause the front element.
   useEffect(() => {
@@ -104,25 +105,6 @@ export function VideoPreview() {
     }
   }, [isPlaying, active, frontSlot, slotEl]);
 
-  if (!active) {
-    return (
-      <div className="preview-empty">
-        <div className="label-big">preview</div>
-        <div>no clip at playhead</div>
-      </div>
-    );
-  }
-
-  // Both videos are always rendered; only one is visible. Position absolutely
-  // so the hidden one doesn't take layout space.
-  const slotStyle = (slot: "a" | "b"): React.CSSProperties => ({
-    width: "100%",
-    height: "100%",
-    position: "absolute",
-    inset: 0,
-    visibility: frontSlot === slot ? "visible" : "hidden",
-  });
-
   const containerRef = useRef<HTMLDivElement>(null);
 
   const toggleFullscreen = useCallback(() => {
@@ -134,6 +116,23 @@ export function VideoPreview() {
       el.requestFullscreen().catch(() => {});
     }
   }, []);
+
+  if (!active) {
+    return (
+      <div className="preview-empty">
+        <div className="label-big">preview</div>
+        <div>no clip at playhead</div>
+      </div>
+    );
+  }
+
+  const slotStyle = (slot: "a" | "b"): React.CSSProperties => ({
+    width: "100%",
+    height: "100%",
+    position: "absolute",
+    inset: 0,
+    visibility: frontSlot === slot ? "visible" : "hidden",
+  });
 
   return (
     <div ref={containerRef} className="preview-container">

@@ -987,10 +987,23 @@ body.dragging-resize .resize-handle { background: rgba(124, 92, 255, 0.6); }
 }
 .clip.selected .clip-thumb { opacity: 0.7; }
 .clip-label {
-  position: relative;
+  position: absolute;
+  bottom: 4px; right: 6px;
   z-index: 1;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
 }
+.clip-clear {
+  position: absolute;
+  top: 2px; right: 4px;
+  z-index: 2;
+  font-size: 14px; line-height: 1;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 100ms ease, color 100ms ease;
+}
+.clip:hover .clip-clear { opacity: 1; }
+.clip-clear:hover { color: var(--danger); }
 
 .dotty::after {
   content: "";
