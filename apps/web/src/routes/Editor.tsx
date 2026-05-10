@@ -5,8 +5,7 @@ import { resumeInflightJobs } from "../lib/scheduler.js";
 import { getWs } from "../lib/wavesurfer-ref.js";
 import { Header } from "../components/Header.js";
 import { LeftRail } from "../components/LeftRail.js";
-import { Sidebar } from "../components/Sidebar.js";
-import { SidebarEmpty } from "../components/SidebarEmpty.js";
+import { RightSidebar } from "../components/RightSidebar.js";
 import { Timeline } from "../components/Timeline.js";
 import { TimelineDropzone } from "../components/TimelineDropzone.js";
 import { VideoPreview } from "../components/VideoPreview.js";
@@ -76,7 +75,7 @@ export function Editor() {
           )}
         </div>
       </main>
-      {selectedClip ? <Sidebar /> : <SidebarEmpty />}
+      <RightSidebar />
       {analysis ? <Timeline /> : <TimelineDropzone />}
       <Toasts />
     </div>

@@ -1,6 +1,6 @@
 export function SidebarEmpty() {
   return (
-    <aside className="right empty">
+    <>
       <div className="empty-title">No region selected</div>
       <div className="empty-hint">Click a region on the timeline to configure or generate.</div>
 
@@ -39,6 +39,6 @@ export function SidebarEmpty() {
           <span className="kbd">0</span>
         </div>
       </div>
-    </aside>
+    </>
   );
 }

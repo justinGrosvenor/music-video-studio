@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore, ZOOM_MIN, ZOOM_MAX } from "../lib/store.js";
 import { getWs, setWs } from "../lib/wavesurfer-ref.js";
 import { Waveform } from "./Waveform.js";
+import { toast } from "../lib/toast.js";
 
 const SECTION_COLORS = [
   "var(--section-intro)",
@@ -43,6 +44,9 @@ export function Timeline() {
   const zoom = useStore((s) => s.zoom);
   const setZoom = useStore((s) => s.setZoom);
   const zoomFit = useStore((s) => s.zoomFit);
+  const splitAtPlayhead = useStore((s) => s.splitAtPlayhead);
+  const mergeWithRight = useStore((s) => s.mergeWithRight);
+  const splitPreviewTime = useStore((s) => s.splitPreviewTime);
   const tracksRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -189,6 +193,25 @@ export function Timeline() {
         </button>
         <div className="time" aria-label="playback time">
           {formatTime(playhead)} / {formatTime(duration)}
+        </div>
+        <div className="transport-edit">
+          <SplitButton splitPreviewTime={splitPreviewTime} onSplit={() => {
+            const r = splitAtPlayhead();
+            if (!r.ok) toast.warning(`Can't split: ${r.reason}`);
+          }} />
+          <button
+            type="button"
+            className="transport-btn"
+            disabled={!selectedClipId}
+            onClick={() => {
+              if (!selectedClipId) return;
+              const r = mergeWithRight(selectedClipId);
+              if (!r.ok) toast.warning(`Can't merge: ${r.reason}`);
+            }}
+            title="Merge selected clip with next (M)"
+          >
+            Merge
+          </button>
         </div>
         <div className="spacer" />
         <div className="zoom-controls">
@@ -369,6 +392,26 @@ function BeatGrid({ analysis }: { analysis: NonNullable<ReturnType<typeof useSto
         );
       })}
     </svg>
+  );
+}
+
+function SplitButton({ splitPreviewTime, onSplit }: {
+  splitPreviewTime: () => number | null;
+  onSplit: () => void;
+}) {
+  const playhead = useStore((s) => s.playhead);
+  void playhead;
+  const splitAt = splitPreviewTime();
+  return (
+    <button
+      type="button"
+      className="transport-btn"
+      onClick={onSplit}
+      disabled={splitAt === null}
+      title={splitAt !== null ? `Split at ${splitAt.toFixed(2)}s (S)` : "Move playhead inside a clip first"}
+    >
+      Split{splitAt !== null ? ` @ ${splitAt.toFixed(1)}s` : ""}
+    </button>
   );
 }
 

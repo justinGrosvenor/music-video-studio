@@ -3,58 +3,13 @@ import { useStore } from "../lib/store.js";
 import {
   createAvatar,
   listAvatars,
-  startTextToImage,
-  pollTask,
   saveImageToLibrary,
   type AvatarSummary,
 } from "../lib/api.js";
 import { downloadFromUrl } from "../lib/download.js";
 import { AssetUploader } from "./AssetUploader.js";
 import { toast } from "../lib/toast.js";
-import { getErrorMessage, type TextToImageModel, type TextToImageRatio } from "@mvs/shared";
-
-const TEXT_TO_IMAGE_MODELS: { value: TextToImageModel; label: string; hint: string }[] = [
-  { value: "gen4_image", label: "Gen-4 Image", hint: "high quality, references optional" },
-  { value: "gen4_image_turbo", label: "Gen-4 Turbo", hint: "fast, cheaper, references required" },
-  { value: "gpt_image_2", label: "GPT Image 2", hint: "OpenAI · up to 4K · 32K char prompts" },
-  { value: "gemini_image3_pro", label: "Imagen 3 Pro", hint: "Google · up to 4K+ · character consistency" },
-  { value: "gemini_2.5_flash", label: "Gemini Flash", hint: "Google Gemini 2.5 Flash, fast" },
-];
-
-// Per-model ratio sets — Runway rejects mismatches, so we constrain in the UI.
-const GEN4_RATIOS: TextToImageRatio[] = [
-  "1920:1080", "1080:1920", "1280:720", "720:1280", "1024:1024", "1080:1080",
-  "1360:768", "1168:880", "1440:1080", "1080:1440", "1808:768", "2112:912",
-  "720:720", "960:720", "720:960", "1680:720",
-];
-const GEMINI_FLASH_RATIOS: TextToImageRatio[] = [
-  "1024:1024", "1344:768", "768:1344", "1184:864", "864:1184",
-  "1536:672", "832:1248", "1248:832", "896:1152", "1152:896",
-];
-const GEMINI_PRO_RATIOS: TextToImageRatio[] = [
-  "1024:1024", "1344:768", "768:1344", "1184:864", "864:1184",
-  "1536:672", "832:1248", "1248:832", "896:1152", "1152:896",
-  "2048:2048", "2528:1696", "1696:2528", "2400:1792", "1792:2400",
-  "2304:1856", "1856:2304", "2752:1536", "1536:2752", "3168:1344",
-  "4096:4096",
-];
-const GPT_IMAGE_RATIOS: TextToImageRatio[] = [
-  "auto",
-  "1920:1080", "1920:1920", "1080:1920",
-  "2560:1440", "2560:2560", "1440:2560",
-  "3840:2160", "2880:2880", "2160:3840",
-  "1920:1280", "1280:1920", "1920:1440", "1440:1920",
-  "2560:1712", "1712:2560", "2560:1920", "1920:2560",
-];
-
-function ratiosFor(model: TextToImageModel): TextToImageRatio[] {
-  switch (model) {
-    case "gemini_2.5_flash": return GEMINI_FLASH_RATIOS;
-    case "gemini_image3_pro": return GEMINI_PRO_RATIOS;
-    case "gpt_image_2": return GPT_IMAGE_RATIOS;
-    default: return GEN4_RATIOS;
-  }
-}
+import { getErrorMessage } from "@mvs/shared";
 
 const LOOKBOOK_MAX = 6;
 
@@ -82,7 +37,6 @@ export function LeftRail() {
   const [mode, setMode] = useState<CastMode>("idle");
   const [existingAvatars, setExistingAvatars] = useState<AvatarSummary[] | null>(null);
   const [loadingList, setLoadingList] = useState(false);
-  const [showGenerator, setShowGenerator] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const avatarLoading = avatarStatus === "creating";
@@ -329,28 +283,6 @@ export function LeftRail() {
             <div key={`ph-${i}`} className="tile placeholder" />
           ))}
         </div>
-        {!showGenerator && (
-          <button
-            type="button"
-            className="btn generate-lookbook-btn"
-            onClick={() => setShowGenerator(true)}
-            disabled={lookbook.length >= LOOKBOOK_MAX}
-            title={lookbook.length >= LOOKBOOK_MAX ? "lookbook full" : "generate an image with AI"}
-          >
-            Generate image
-          </button>
-        )}
-        {showGenerator && (
-          <ImageGenerator
-            lookbook={lookbook}
-            onDone={(url) => {
-              addLookbook(url);
-              setShowGenerator(false);
-            }}
-            onClose={() => setShowGenerator(false)}
-            onRehosted={replaceLookbookUrl}
-          />
-        )}
       </div>
 
       {analysis && (
@@ -370,159 +302,6 @@ export function LeftRail() {
         <ImageLightbox url={previewUrl} onClose={() => setPreviewUrl(null)} />
       )}
     </aside>
-  );
-}
-
-function ImageGenerator({
-  lookbook,
-  onDone,
-  onClose,
-  onRehosted,
-}: {
-  lookbook: string[];
-  onDone: (url: string) => void;
-  onClose: () => void;
-  onRehosted: (oldUrl: string, newUrl: string) => void;
-}) {
-  const [model, setModel] = useState<TextToImageModel>("gen4_image");
-  const [ratio, setRatio] = useState<TextToImageRatio>("1920:1080");
-  const [prompt, setPrompt] = useState("");
-  const [useRefs, setUseRefs] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [progressLabel, setProgressLabel] = useState<string | null>(null);
-
-  const ratios = ratiosFor(model);
-  // Snap ratio to a value the chosen model supports.
-  useEffect(() => {
-    if (!ratios.includes(ratio)) setRatio(ratios[0]!);
-  }, [model]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const turboNeedsRefs = model === "gen4_image_turbo";
-  const refsAvailable = lookbook.length > 0;
-  const effectiveUseRefs = useRefs || turboNeedsRefs;
-  const maxRefs = model === "gpt_image_2" ? 16 : model === "gemini_image3_pro" ? 14 : 3;
-  const canGenerate =
-    !busy &&
-    prompt.trim().length > 0 &&
-    (!turboNeedsRefs || refsAvailable);
-
-  const onGenerate = useCallback(async () => {
-    if (!canGenerate) return;
-    setBusy(true);
-    setError(null);
-    setProgressLabel("queued");
-    try {
-      const referenceImages = effectiveUseRefs && refsAvailable
-        ? lookbook.slice(0, maxRefs).map((uri) => ({ uri }))
-        : undefined;
-      const { id } = await startTextToImage({
-        promptText: prompt.trim(),
-        model,
-        ratio,
-        ...(referenceImages ? { referenceImages } : {}),
-      });
-      setProgressLabel("generating…");
-      const task = await pollTask(id);
-      if (task.status !== "SUCCEEDED" || !task.output?.[0]) {
-        throw new Error(task.error ?? `task ${task.status.toLowerCase()}`);
-      }
-      const imageUrl = task.output[0];
-      onDone(imageUrl);
-      toast.success("Image added to lookbook");
-      setPrompt("");
-
-      // Auto-save into the image library so it's reusable across projects
-      // and downloadable from there. The server rehosts external (Runway)
-      // URLs into /storage/images/<id>/; on success swap the lookbook entry
-      // to the durable URL so it doesn't rot when Runway expires the link.
-      void saveImageToLibrary({
-        id: `img-${crypto.randomUUID().slice(0, 8)}`,
-        name: prompt.trim().slice(0, 60),
-        url: imageUrl,
-        source: "generated",
-        prompt: prompt.trim(),
-        model,
-      })
-        .then((saved) => {
-          if (saved.url !== imageUrl) onRehosted(imageUrl, saved.url);
-        })
-        .catch((err) => console.warn("auto-save image to library failed", err));
-    } catch (err) {
-      const msg = getErrorMessage(err).slice(0, 140);
-      setError(msg);
-      toast.error(`Generation failed: ${msg}`);
-    } finally {
-      setBusy(false);
-      setProgressLabel(null);
-    }
-  }, [canGenerate, effectiveUseRefs, refsAvailable, lookbook, prompt, model, ratio, maxRefs, onDone]);
-
-  return (
-    <div className="image-generator">
-      <div className="image-generator-header">
-        <span className="label">Generate image</span>
-        <button type="button" className="add" onClick={onClose} disabled={busy}>close</button>
-      </div>
-      <textarea
-        className="prompt"
-        placeholder="Describe the image…"
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        rows={3}
-        disabled={busy}
-      />
-      <div className="image-generator-row">
-        <select
-          className="select"
-          value={model}
-          onChange={(e) => setModel(e.target.value as TextToImageModel)}
-          disabled={busy}
-        >
-          {TEXT_TO_IMAGE_MODELS.map((m) => (
-            <option key={m.value} value={m.value}>{m.label}</option>
-          ))}
-        </select>
-        <select
-          className="select"
-          value={ratio}
-          onChange={(e) => setRatio(e.target.value as TextToImageRatio)}
-          disabled={busy}
-        >
-          {ratios.map((r) => (
-            <option key={r} value={r}>{r}</option>
-          ))}
-        </select>
-      </div>
-      <label className="continuity-toggle">
-        <input
-          type="checkbox"
-          checked={effectiveUseRefs && refsAvailable}
-          onChange={(e) => setUseRefs(e.target.checked)}
-          disabled={busy || turboNeedsRefs || !refsAvailable}
-        />
-        <span>
-          Use lookbook as references
-          {turboNeedsRefs && <span className="dim"> (required for Turbo)</span>}
-          {!refsAvailable && <span className="dim"> (no images yet)</span>}
-          {refsAvailable && effectiveUseRefs && (
-            <span className="dim"> ({Math.min(maxRefs, lookbook.length)} sent)</span>
-          )}
-        </span>
-      </label>
-      {turboNeedsRefs && !refsAvailable && (
-        <div className="cast-error">Turbo needs at least one lookbook image. Upload one or pick another model.</div>
-      )}
-      {error && <div className="cast-error">{error}</div>}
-      <button
-        type="button"
-        className="btn primary"
-        disabled={!canGenerate}
-        onClick={onGenerate}
-      >
-        {busy ? (progressLabel ?? "working…") : "Generate"}
-      </button>
-    </div>
   );
 }
 

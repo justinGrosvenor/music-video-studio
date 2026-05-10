@@ -56,8 +56,6 @@ export function Sidebar() {
   const characterImage = useStore((s) => s.characterImageUrl);
   const avatarId = useStore((s) => s.avatarId);
   const avatarStatus = useStore((s) => s.avatarStatus);
-  const splitAtPlayhead = useStore((s) => s.splitAtPlayhead);
-  const mergeWithRight = useStore((s) => s.mergeWithRight);
   const songId = useStore((s) => s.songId);
   const audioUrl = useStore((s) => s.audioUrl);
 
@@ -100,16 +98,6 @@ export function Sidebar() {
     hasPrev &&
     hasNext &&
     modelSupportsBridge(effectiveModel);
-
-  const onSplit = () => {
-    const r = splitAtPlayhead();
-    if (!r.ok) toast.warning(`Can't split: ${r.reason}`);
-  };
-
-  const onMerge = () => {
-    const r = mergeWithRight(clip.id);
-    if (!r.ok) toast.warning(`Can't merge: ${r.reason}`);
-  };
 
   const canGenerate = checkCanGenerate(clip, {
     prompt,
@@ -158,27 +146,12 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="right">
+    <>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
         <span className="pill">{sectionLabel}</span>
       </div>
       <div className="meta">
         {durationSec.toFixed(1)}s · {clip.id}
-      </div>
-
-      <div className="option-group">
-        <div className="label">Region</div>
-        <div className="region-actions">
-          <SplitButton onSplit={onSplit} />
-          <button
-            type="button"
-            className="btn"
-            onClick={onMerge}
-            title="merge with the next clip (M)"
-          >
-            ⇥ Merge right
-          </button>
-        </div>
       </div>
 
       <SourcePicker
@@ -261,54 +234,56 @@ export function Sidebar() {
         </div>
       )}
 
-      {!isLibrarySource && (
-        <button
-          className="generate-btn"
-          onClick={onGenerate}
-          disabled={
-            clip.status === "queued" ||
-            clip.status === "generating" ||
-            !canGenerate.ok
-          }
-          title={canGenerate.ok ? undefined : canGenerate.reason}
-        >
-          {clip.status === "queued"
-            ? "Queued…"
-            : clip.status === "generating"
-              ? "Generating…"
-              : clip.status === "failed"
-                ? "Retry"
-                : clip.source === "aleph"
-                  ? "Restyle clip"
-                  : clip.source === "lipSync"
-                    ? "Lip-sync vocal"
-                    : clip.status === "ready"
-                      ? "Regenerate"
-                      : "Generate"}
-        </button>
-      )}
+      <div className="sidebar-footer">
+        {!isLibrarySource && (
+          <button
+            className="generate-btn"
+            onClick={onGenerate}
+            disabled={
+              clip.status === "queued" ||
+              clip.status === "generating" ||
+              !canGenerate.ok
+            }
+            title={canGenerate.ok ? undefined : canGenerate.reason}
+          >
+            {clip.status === "queued"
+              ? "Queued…"
+              : clip.status === "generating"
+                ? "Generating…"
+                : clip.status === "failed"
+                  ? "Retry"
+                  : clip.source === "aleph"
+                    ? "Restyle clip"
+                    : clip.source === "lipSync"
+                      ? "Lip-sync vocal"
+                      : clip.status === "ready"
+                        ? "Regenerate"
+                        : "Generate"}
+          </button>
+        )}
 
-      {(clip.videoUrl || clip.status !== "empty") && (
-        <button
-          type="button"
-          className="btn ghost clear-clip-btn"
-          onClick={() => {
-            const isReady = clip.status === "ready";
-            if (isReady && !confirm("Clear this clip's video? Source choice and prompts are kept.")) return;
-            updateClip(clip.id, {
-              status: "empty",
-              videoUrl: undefined,
-              thumbnailUrl: undefined,
-              generationTaskId: undefined,
-              lastError: undefined,
-            });
-          }}
-          title="Clear this clip's video — keeps source and prompt"
-        >
-          Clear clip
-        </button>
-      )}
-    </aside>
+        {(clip.videoUrl || clip.status !== "empty") && (
+          <button
+            type="button"
+            className="btn ghost clear-clip-btn"
+            onClick={() => {
+              const isReady = clip.status === "ready";
+              if (isReady && !confirm("Clear this clip's video? Source choice and prompts are kept.")) return;
+              updateClip(clip.id, {
+                status: "empty",
+                videoUrl: undefined,
+                thumbnailUrl: undefined,
+                generationTaskId: undefined,
+                lastError: undefined,
+              });
+            }}
+            title="Clear this clip's video — keeps source and prompt"
+          >
+            Clear clip
+          </button>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -455,24 +430,6 @@ function SourcePicker({
         </div>
       )}
     </div>
-  );
-}
-
-function SplitButton({ onSplit }: { onSplit: () => void }) {
-  const splitPreviewTime = useStore((s) => s.splitPreviewTime);
-  const playhead = useStore((s) => s.playhead);
-  void playhead;
-  const splitAt = splitPreviewTime();
-  return (
-    <button
-      type="button"
-      className="btn"
-      onClick={onSplit}
-      disabled={splitAt === null}
-      title={splitAt !== null ? `split at ${splitAt.toFixed(2)}s (S)` : "move playhead inside this clip first"}
-    >
-      ⎟ Split{splitAt !== null ? ` @ ${splitAt.toFixed(2)}s` : ""}
-    </button>
   );
 }
 
