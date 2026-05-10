@@ -3,7 +3,7 @@ import { useStore, ZOOM_MIN, ZOOM_MAX } from "../lib/store.js";
 import { getWs, setWs } from "../lib/wavesurfer-ref.js";
 import { Waveform } from "./Waveform.js";
 import { toast } from "../lib/toast.js";
-import { uploadVideo } from "../lib/api.js";
+import { uploadVideo, saveClipToServer } from "../lib/api.js";
 
 const SECTION_COLORS = [
   "var(--section-intro)",
@@ -59,11 +59,29 @@ export function Timeline() {
       toast.warning("Only video files can be dropped here");
       return;
     }
+    const clip = useStore.getState().clips.find((c) => c.id === clipId);
+    if (!clip) return;
     updateClip(clipId, { status: "generating" } as any);
     try {
       const { url } = await uploadVideo(file);
       updateClip(clipId, { status: "ready", videoUrl: url, source: "upload" } as any);
       toast.success("Video added");
+
+      void saveClipToServer({
+        id: clipId,
+        name: file.name.replace(/\.[^.]+$/, "").slice(0, 60),
+        videoUrl: url,
+        source: "upload",
+        prompt: null,
+        duration: clip.end - clip.start,
+        sectionLabel: null,
+      })
+        .then((saved) => {
+          if (saved.videoUrl && saved.videoUrl !== url) {
+            useStore.getState().updateClip(clipId, { videoUrl: saved.videoUrl });
+          }
+        })
+        .catch((err) => console.warn("auto-save dropped clip failed", err));
     } catch {
       updateClip(clipId, { status: "empty" } as any);
       toast.error("Upload failed");

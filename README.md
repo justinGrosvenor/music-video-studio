@@ -22,6 +22,9 @@ Upload a track → Modal sidecar analyzes BPM / beats / sections / energy → th
 - Drag clip boundaries; cap-aware so neither side can grow past the 15s generation limit.
 - WaveSurfer.js waveform with overlay rows for sections, lyrics, and clip lanes.
 - Zoom 1×–32× with `+` / `-` / `0` shortcuts.
+- Drag-and-drop video files from the filesystem onto any clip.
+- Video thumbnails on filled clips; clear button (×) on hover.
+- Split / merge controls in the transport bar.
 
 ### Generation sources (per clip)
 - **Continue from previous clip** — extracts the last frame of the prior generated video and uses it as the init image. Defaults whenever a previous clip is ready.
@@ -36,7 +39,7 @@ Upload a track → Modal sidecar analyzes BPM / beats / sections / energy → th
 |---|---|
 | Image-to-video | Gen-4.5, Gen-4 Turbo, SeedDance 2, Veo 3.1, Veo 3.1 Fast |
 | Text-to-video | Gen-4.5, SeedDance 2, Veo 3.1, Veo 3.1 Fast |
-| Text-to-image | Gen-4 Image, Gen-4 Image Turbo, Nano Banana (Gemini 2.5 Flash Image) |
+| Text-to-image | Gen-4 Image, Gen-4 Image Turbo, GPT Image 2, Gemini Imagen 3 Pro, Gemini 2.5 Flash |
 | Video-to-video (Aleph) | Gen-4 Aleph, SeedDance 2 |
 | Lip-sync | GWM-1 Avatars |
 | Voice isolation | ElevenLabs (via Runway) |
@@ -46,8 +49,15 @@ Per-model duration is auto-snapped to whatever each model accepts (e.g. Gen-4.5:
 ### Cast / lookbook
 - Upload a character image, then create a Runway avatar from it (personality + voice preset).
 - Browse and pick existing avatars from the workspace.
-- Lookbook (up to 6 reference images): upload directly, or generate via the in-app image generator (prompt + model + ratio + optional reference toggle).
+- Lookbook (up to 16 reference images): upload directly, or generate via the in-app image generator (prompt + model + ratio + optional reference toggle).
+- Generated images auto-save to the image library and rehost external URLs to local/S3 storage.
 - Generated images can flow into the Lookbook and back out as references for subsequent generations — coherent style across a project for free.
+- Click any lookbook image to expand it in a lightbox.
+
+### Preview
+- Double-buffered video preview — two `<video>` elements alternate so the next clip preloads with no black flash at boundaries.
+- Fullscreen mode on the preview panel.
+- Tabbed right sidebar (Image | Video) — auto-switches to Video tab when a clip is selected.
 
 ### Project lifecycle
 - Save / load projects to the API; local autosave to `localStorage` with Zod-validated rehydration.
@@ -59,6 +69,8 @@ Per-model duration is auto-snapped to whatever each model accepts (e.g. Gen-4.5:
 - Browser-side concurrency cap (3 in-flight Runway tasks).
 - Continue clips block on the previous clip's completion (dependency wait, no race).
 - Per-job state: `queued` / `running` / `succeeded` / `failed` / `cancelled`. Cancellable in-flight.
+- Resume inflight generation jobs on page refresh (no lost work).
+- Model-aware poll timeouts: 15 min for SeedDance 2 / Veo 3.1, 10 min for others.
 - Toast notifications + queue chip in the header.
 
 ### Storage
@@ -79,7 +91,7 @@ Per-model duration is auto-snapped to whatever each model accepts (e.g. Gen-4.5:
 ## Stack
 
 - `apps/web` — React 19 + Vite + React Router v7 (SPA mode) + WaveSurfer.js + Zustand
-- `apps/api` — Fastify + TypeScript + `@runwayml/sdk@3.20` + ffmpeg
+- `apps/api` — Fastify + TypeScript + `@runwayml/sdk@3.21` + ffmpeg
 - `packages/shared` — Zod schemas + TS types shared across web and api
 - `modal/` — Python audio analysis (librosa) — Modal endpoint + local FastAPI fallback
 
@@ -132,10 +144,11 @@ The Vite dev server proxies `/api` and `/storage` to Fastify.
 │  /api/songs/vocal-stem             │── voice isolation (cached)
 │  /api/audio/slice                  │── ffmpeg cut
 │  /api/images/upload                │── magic-byte sniff
+│  /api/videos/upload                │── drag-and-drop import
 │  /api/avatars · /api/avatars/create│── Runway avatars
 │  /api/generate/image-to-video      │── 5 models
 │  /api/generate/video-to-video      │── Aleph
-│  /api/generate/text-to-image       │── 3 models incl. Nano Banana
+│  /api/generate/text-to-image       │── 5 models
 │  /api/generate/text-to-video       │── 4 models
 │  /api/generate/lip-sync            │── GWM-1 Avatars
 │  /api/videos/extract-last-frame    │── ffmpeg → png seed
@@ -176,6 +189,6 @@ See `infra/README.md` for the Terragrunt + Terraform bootstrap flow.
 ## Roadmap / known limitations
 
 - `actTwo` source is stubbed in the schema and UI but not yet wired to a webcam-recording flow.
-- Runway-hosted output URLs (generated images, video clips) typically expire 24–48h after creation. Lookbook entries that came from in-app generation aren't rehosted to local/S3 storage; for durable projects, upload from disk or add an ingest step.
+- Runway-hosted output URLs expire 24–48h after creation. Generated clips and lookbook images are auto-rehosted to local/S3 storage, but externally-pasted URLs are not.
 - Section labels are positional (`section 1`, `section 2`, …) — semantic labels (`verse`, `chorus`, `bridge`) require swapping the analyzer for `allin1` (GPU, Modal-only).
 - Render is a v1 overlay graph: hard cuts by default with optional 150ms alpha fades. No crossfades or transitions yet.
