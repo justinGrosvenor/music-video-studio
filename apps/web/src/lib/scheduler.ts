@@ -380,7 +380,8 @@ async function run(jobId: string): Promise<void> {
       return;
     }
 
-    const final: Task = await pollTask(task.id);
+    const slowModel = job.input.model === "seedance2" || job.input.model === "veo3.1";
+    const final: Task = await pollTask(task.id, slowModel ? 5000 : 2500, slowModel ? 900_000 : 600_000);
 
     if (isCancelled(jobId)) {
       useStore.getState().updateClip(job.clipId, { status: "empty" });
