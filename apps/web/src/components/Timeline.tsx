@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useStore, ZOOM_MIN, ZOOM_MAX } from "../lib/store.js";
 import { getWs, setWs } from "../lib/wavesurfer-ref.js";
 import { Waveform } from "./Waveform.js";
 import { toast } from "../lib/toast.js";
+import { uploadVideo } from "../lib/api.js";
 
 const SECTION_COLORS = [
   "var(--section-intro)",
@@ -51,6 +52,23 @@ export function Timeline() {
   const tracksRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+
+  const onClipDrop = useCallback(async (clipId: string, file: File) => {
+    if (!file.type.startsWith("video/")) {
+      toast.warning("Only video files can be dropped here");
+      return;
+    }
+    updateClip(clipId, { status: "generating" } as any);
+    try {
+      const { url } = await uploadVideo(file);
+      updateClip(clipId, { status: "ready", videoUrl: url, source: "upload" } as any);
+      toast.success("Video added");
+    } catch {
+      updateClip(clipId, { status: "empty" } as any);
+      toast.error("Upload failed");
+    }
+  }, [updateClip]);
 
   useEffect(() => {
     const el = tracksRef.current;
@@ -311,10 +329,22 @@ export function Timeline() {
                     )}
                     <button
                       type="button"
-                      className={cls}
+                      className={`${cls}${dropTarget === c.id ? " drop-over" : ""}`}
                       onClick={(e) => {
                         e.stopPropagation();
                         selectClip(c.id);
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "copy";
+                        setDropTarget(c.id);
+                      }}
+                      onDragLeave={() => setDropTarget(null)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setDropTarget(null);
+                        const file = e.dataTransfer.files[0];
+                        if (file) onClipDrop(c.id, file);
                       }}
                       aria-label={`${c.status} clip ${c.id}`}
                     >

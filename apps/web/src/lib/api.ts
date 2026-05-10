@@ -49,6 +49,12 @@ export async function uploadImage(file: File): Promise<{ id: string; url: string
   return jsonOrThrow(await fetch("/api/images/upload", { method: "POST", body: fd }));
 }
 
+export async function uploadVideo(file: File): Promise<{ id: string; url: string }> {
+  const fd = new FormData();
+  fd.append("file", file);
+  return jsonOrThrow(await fetch("/api/videos/upload", { method: "POST", body: fd }));
+}
+
 export async function extractLastFrame(videoUrl: string, time?: number): Promise<{ url: string }> {
   return jsonOrThrow(
     await fetch("/api/videos/extract-last-frame", {

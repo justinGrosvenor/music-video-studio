@@ -11,7 +11,7 @@ import { AssetUploader } from "./AssetUploader.js";
 import { toast } from "../lib/toast.js";
 import { getErrorMessage } from "@mvs/shared";
 
-const LOOKBOOK_MAX = 6;
+const LOOKBOOK_MAX = 16;
 
 type CastMode = "idle" | "browse";
 

@@ -156,6 +156,17 @@ app.post("/api/images/upload", { config: { rateLimit: { max: 20, timeWindow: "1 
   return reply.send({ id, url: publicUrl });
 });
 
+app.post("/api/videos/upload", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (req, reply) => {
+  const file = await req.file();
+  if (!file) return reply.code(400).send({ error: "no file" });
+  if (!file.mimetype?.startsWith("video/")) {
+    return reply.code(400).send({ error: `expected video, got ${file.mimetype}` });
+  }
+  const buf = await file.toBuffer();
+  const { id, publicUrl } = await saveUpload(buf, file.filename, file.mimetype);
+  return reply.send({ id, url: publicUrl });
+});
+
 app.get("/api/songs/:id/analysis", async (req, reply) => {
   const params = z.object({ id: SafeId }).parse(req.params);
   let analysis;

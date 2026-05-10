@@ -986,6 +986,11 @@ body.dragging-resize .resize-handle { background: rgba(124, 92, 255, 0.6); }
   opacity: 0.55;
 }
 .clip.selected .clip-thumb { opacity: 0.7; }
+.clip.drop-over {
+  outline: 2px solid var(--cool);
+  outline-offset: -2px;
+  background: rgba(92, 200, 255, 0.15);
+}
 .clip-label {
   position: absolute;
   bottom: 4px; right: 6px;

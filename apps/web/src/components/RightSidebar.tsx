@@ -5,7 +5,7 @@ import { SidebarEmpty } from "./SidebarEmpty.js";
 import { ImageGenerator } from "./ImageGenerator.js";
 import { toast } from "../lib/toast.js";
 
-const LOOKBOOK_MAX = 6;
+const LOOKBOOK_MAX = 16;
 
 type Tab = "video" | "image";
 

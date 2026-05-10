@@ -51,7 +51,12 @@ export function VideoPreview() {
 
     const activeKey = slotKey(active);
     if (loadedRef.current[frontSlot] === activeKey) {
-      // Already loaded on front — nothing to swap.
+      // Already loaded on front — but may be ended from a previous play.
+      const front = slotEl(frontSlot);
+      if (front) {
+        seekTo(front, active, playhead);
+        if (isPlaying) front.play().catch(() => {});
+      }
     } else if (loadedRef.current[back] === activeKey) {
       // The back slot is preloaded with the new active clip — promote it.
       const oldFront = slotEl(frontSlot);
