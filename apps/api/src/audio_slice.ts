@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { readFile, unlink } from "node:fs/promises";
 import { storage } from "./storage.js";
 import { runFfmpeg } from "./ffmpeg.js";
+import { assertSafeHost } from "./net.js";
 
 /** Slice a [start, end] window out of a remote audio URL via ffmpeg, then push
  * the result through the storage backend. Re-encodes to mp3 so seeks are
@@ -13,6 +14,7 @@ export async function sliceAudio(
   end: number
 ): Promise<{ url: string }> {
   if (end <= start) throw new Error("slice end must be > start");
+  if (/^https?:\/\//i.test(audioUrl)) await assertSafeHost(audioUrl);
   const dur = (end - start).toFixed(3);
   const tempPath = join(
     tmpdir(),

@@ -1,6 +1,9 @@
 import { extname } from "node:path";
 import { config } from "./config.js";
 import { storage } from "./storage.js";
+import { assertSafeHost, readCappedBody } from "./net.js";
+
+const MAX_REHOST_BYTES = 200 * 1024 * 1024; // 200 MB
 
 /**
  * Make `url` durable. Two cases:
@@ -15,6 +18,14 @@ import { storage } from "./storage.js";
  * On any fetch / write failure the original URL is returned unchanged so the
  * caller can still record the entry, with a console warning. The caller is
  * responsible for surfacing that the link may rot.
+ *
+ * SSRF protections:
+ *   - Only http(s) schemes
+ *   - DNS-resolve the host and refuse private / loopback / link-local IPs
+ *     (so client-supplied URLs can't hit IMDS at 169.254.169.254 and steal
+ *     the task IAM creds).
+ *   - Cap the response body at MAX_REHOST_BYTES so a hostile URL can't fill
+ *     disk/S3.
  */
 export async function rehostExternalUrl(
   url: string,
@@ -24,10 +35,11 @@ export async function rehostExternalUrl(
   if (isOwnedStorageUrl(url)) return url;
 
   try {
-    const res = await fetch(url);
+    await assertSafeHost(url);
+    const res = await fetch(url, { redirect: "follow" });
     if (!res.ok) throw new Error(`fetch ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    const inferredExt = extname(url.split("?")[0] || "") || defaultExt;
+    const buf = await readCappedBody(res, MAX_REHOST_BYTES);
+    const inferredExt = extname(new URL(url).pathname) || defaultExt;
     const filename = `rehosted${inferredExt}`;
     const { publicUrl } = await storage.saveUpload(buf, filename);
     return publicUrl;
@@ -52,3 +64,4 @@ function isOwnedStorageUrl(url: string): boolean {
   }
   return false;
 }
+

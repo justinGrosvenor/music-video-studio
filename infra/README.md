@@ -130,7 +130,7 @@ Bucket has versioning + SSE + full public-access block; lock table is on-demand 
 ## What it costs (rough)
 
 - ALB: ~$22/mo (this is the main fixed cost)
-- ECS Fargate task (1 vCPU / 2 GB, on-demand): ~$0.05/hr
+- ECS Fargate task (2 vCPU / 4 GB, on-demand): ~$0.10/hr
 - ECR storage: cents
 - CloudWatch logs (7-day retention): cents
 - CloudFront (PriceClass_100, US/EU only): per-GB transfer + per-million requests; pennies for hackathon traffic

@@ -14,7 +14,6 @@ import { extname, basename } from "node:path";
 import sharp from "sharp";
 import { config } from "./config.js";
 import { resolveLocalPath, mimeType } from "./paths.js";
-import { pollUntil } from "./poll.js";
 
 // SDK requires an apiKey at construction. Use a placeholder when missing so the
 // server can still boot for UI / audio / render development; any /api/generate/*
@@ -22,7 +21,8 @@ import { pollUntil } from "./poll.js";
 export const runway = new RunwayML({
   apiKey: config.RUNWAYML_API_SECRET ?? "missing-RUNWAYML_API_SECRET",
 });
-const RUNWAY_BASE = process.env.RUNWAYML_BASE_URL ?? "https://api.dev.runwayml.com";
+// Despite the `.dev` subdomain, this is Runway's production developer API.
+const RUNWAY_BASE = config.RUNWAYML_BASE_URL;
 
 export type RunwayTask = { id: string };
 
@@ -306,10 +306,11 @@ export async function actTwo(req: ActTwoRequest): Promise<RunwayTask> {
   } catch (err) { rethrowRunway(err); }
 }
 
-// --- Endpoints not exposed by @runwayml/sdk@2.6.0 ---
-// Lip-Sync and Voice-Isolation exist in the REST API but the typed SDK doesn't
-// surface them yet. We hit them with raw fetch and rely on the same task-status
-// machinery for polling.
+// --- Endpoints not exposed by the typed SDK ---
+// Voice-Isolation exists in the REST API but isn't surfaced by the SDK; we
+// hit it with raw fetch and rely on the same task-status machinery for
+// polling. (Lip-Sync is now in the typed SDK as `runway.avatarVideos.create`
+// and uses the normal path above.)
 
 async function rawCreate(path: string, body: unknown): Promise<RunwayTask> {
   if (!config.RUNWAYML_API_SECRET) {
@@ -411,27 +412,6 @@ export async function getAvatar(id: string): Promise<AvatarSubmitResult> {
     status: a.status as AvatarSubmitResult["status"],
     failureReason: "failureReason" in a ? (a.failureReason as string | null) : null,
   };
-}
-
-// Legacy synchronous version retained in case the older code path is still
-// referenced — exported under a different name. Not called by /api routes.
-export async function createAvatarSync(imageUrl: string, name: string): Promise<{ avatarId: string }> {
-  const submitted = await createAvatar(imageUrl, name);
-  if (submitted.status === "FAILED") {
-    throw new Error(`avatar creation failed: ${submitted.failureReason ?? "unknown"}`);
-  }
-  if (submitted.status === "PROCESSING") {
-    const polled = await pollUntil(
-      () => getAvatar(submitted.avatarId),
-      (a) => a.status === "READY" || a.status === "FAILED",
-      { timeoutMs: 120_000, label: "avatar processing" }
-    );
-    if (polled.status === "FAILED") {
-      throw new Error(`avatar processing failed: ${polled.failureReason ?? "unknown"}`);
-    }
-    return { avatarId: polled.avatarId };
-  }
-  return { avatarId: submitted.avatarId };
 }
 
 export async function lipSync(req: LipSyncRequest): Promise<RunwayTask> {

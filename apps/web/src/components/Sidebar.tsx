@@ -338,6 +338,11 @@ function checkCanGenerate(
     }
     return { ok: true };
   }
+  if (clip.source === "actTwo") {
+    // Webcam recording isn't wired yet; the picker option ships ahead of
+    // implementation. Block here so we don't enqueue with an empty seed.
+    return { ok: false, reason: "Act-Two webcam capture is not wired yet — coming soon" };
+  }
   if (!ctx.characterImage) return { ok: false, reason: "Upload a character image first" };
   return { ok: true };
 }

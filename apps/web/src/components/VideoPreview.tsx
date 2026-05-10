@@ -34,26 +34,24 @@ export function VideoPreview() {
 
   const slotKey = (clip: { id: string; videoUrl: string }) => `${clip.id}\0${clip.videoUrl}`;
 
-  const loadInto = useCallback((slot: "a" | "b", clip: { id: string; videoUrl: string; start: number; end: number }) => {
+  const loadInto = useCallback((slot: "a" | "b", clip: { id: string; videoUrl: string }) => {
     const key = slotKey(clip);
     if (loadedRef.current[slot] === key) return;
     const el = slotEl(slot);
     if (!el) return;
     loadedRef.current[slot] = key;
-    // Attach listeners BEFORE setting src — if the metadata is in the browser
-    // cache (very common when remounting a clip we already played), the
-    // `loadedmetadata` event can fire synchronously inside `load()` and we'd
-    // miss it if we attached after.
-    const slotDur = clip.end - clip.start;
-    el.addEventListener("loadedmetadata", () => applyPlaybackRate(el, slotDur), { once: true });
     el.src = clip.videoUrl;
     el.load();
   }, [slotEl]);
 
   // Load/swap clips when the active clip changes. Preload next.
+  // Cleanup removes any pending loadedmetadata listeners — without it, a
+  // stale listener fires with old props when active/playhead changes before
+  // metadata loads (e.g. fast clicks during cold-load).
   useEffect(() => {
     if (!active) return;
     const back: "a" | "b" = frontSlot === "a" ? "b" : "a";
+    const cleanups: Array<() => void> = [];
 
     const activeKey = slotKey(active);
     const slotDur = active.end - active.start;
@@ -63,7 +61,7 @@ export function VideoPreview() {
       // (e.g. user dragged a boundary). Re-apply + repaint.
       const front = slotEl(frontSlot);
       if (front) {
-        applyPlaybackRate(front, slotDur);
+        applyPlaybackRate(front, slotDur, active.source);
         seekTo(front, active, playhead);
         repaintIfStale(front, isPlaying);
       }
@@ -73,19 +71,31 @@ export function VideoPreview() {
       const newFront = slotEl(back);
       oldFront?.pause();
       if (newFront) {
-        applyPlaybackRate(newFront, slotDur);
+        applyPlaybackRate(newFront, slotDur, active.source);
         seekTo(newFront, active, playhead);
         repaintIfStale(newFront, isPlaying);
       }
       setFrontSlot(back);
     } else {
-      // Cold load into the current front slot.
+      // Cold load into the current front slot. Apply rate once metadata
+      // arrives — pure addEventListener (no `{ once: true }`) so the
+      // cleanup below can remove it if the effect re-runs first.
       loadInto(frontSlot, active);
+      const front = slotEl(frontSlot);
+      if (front) {
+        const onMeta = () => applyPlaybackRate(front, slotDur, active.source);
+        if (front.readyState >= 1) onMeta();
+        else {
+          front.addEventListener("loadedmetadata", onMeta);
+          cleanups.push(() => front.removeEventListener("loadedmetadata", onMeta));
+        }
+      }
     }
 
     if (next && loadedRef.current[back] !== slotKey(next)) {
       loadInto(back, next);
     }
+    return () => { for (const c of cleanups) c(); };
     // playhead intentionally omitted — only used for the inline seek above,
     // which we want bound to the active-change moment, not every tick.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -107,9 +117,10 @@ export function VideoPreview() {
     };
     if (front.readyState >= 1) {
       doSeek();
-    } else {
-      front.addEventListener("loadedmetadata", doSeek, { once: true });
+      return;
     }
+    front.addEventListener("loadedmetadata", doSeek);
+    return () => front.removeEventListener("loadedmetadata", doSeek);
   }, [playhead, active, frontSlot, slotEl, isPlaying]);
 
   // Play/pause the front element.
@@ -225,8 +236,16 @@ function repaintIfStale(el: HTMLVideoElement, isPlaying: boolean): void {
  * Clamped to [0.25, 4] so a degenerate slotDur (e.g. mid-drag transient zero)
  * can't break the element. We're muted so audio artifacts of off-rate
  * playback are irrelevant.
+ *
+ * lipSync is the exception: the renderer hard-trims those clips (no
+ * time-stretch, to keep mouth movement in sync with the audio), so preview
+ * must also play them at 1x.
  */
-function applyPlaybackRate(el: HTMLVideoElement, slotDur: number): void {
+function applyPlaybackRate(el: HTMLVideoElement, slotDur: number, source?: string): void {
+  if (source === "lipSync") {
+    if (el.playbackRate !== 1) el.playbackRate = 1;
+    return;
+  }
   const vidDur = el.duration;
   if (!Number.isFinite(vidDur) || vidDur <= 0 || slotDur <= 0) return;
   const rate = Math.max(0.25, Math.min(4, vidDur / slotDur));

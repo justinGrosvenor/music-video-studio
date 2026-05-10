@@ -1,9 +1,9 @@
 import { join } from "node:path";
-import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, unlink } from "node:fs/promises";
 import { paths, storage } from "./storage.js";
 import { config } from "./config.js";
 import { runFfmpeg, probeDuration } from "./ffmpeg.js";
+import { assertSafeHost } from "./net.js";
 
 export type RenderClip = {
   start: number;
@@ -33,6 +33,12 @@ const FADE_DURATION = 0.15;
  * at each clip's edges (gentler boundaries; not real crossfades).
  */
 export async function renderTimeline(req: RenderRequest): Promise<{ url: string }> {
+  // SSRF guard: every URL ffmpeg sees comes from the client. Refuse
+  // pre-flight if any of them resolve to a private/loopback IP.
+  for (const u of [req.audioUrl, ...req.clips.map((c) => c.videoUrl)]) {
+    if (/^https?:\/\//i.test(u)) await assertSafeHost(u);
+  }
+
   await mkdir(paths.RENDERS, { recursive: true });
   const outputName = `${req.projectId}.mp4`;
   const outputPath = join(paths.RENDERS, outputName);
@@ -126,13 +132,16 @@ export async function renderTimeline(req: RenderRequest): Promise<{ url: string 
 
   await runFfmpeg(args);
   const { publicUrl } = await storage.saveRender(outputPath, outputName, "video/mp4");
+  // In s3 mode the saveRender call read the file into memory and pushed it
+  // to the bucket; the local copy on Fargate's 20 GiB ephemeral disk is
+  // dead weight. (Local-mode renames the file into the renders dir, so we
+  // mustn't delete in that case.)
+  if (config.STORAGE_BACKEND === "s3") {
+    await unlink(outputPath).catch(() => {});
+  }
   return { url: publicUrl };
 }
 
 export async function writeRenderManifest(projectId: string, req: RenderRequest): Promise<void> {
   await storage.saveJson(`renders/${projectId}.manifest.json`, req);
-}
-
-export function renderExists(projectId: string): boolean {
-  return config.STORAGE_BACKEND === "local" && existsSync(join(paths.RENDERS, `${projectId}.mp4`));
 }

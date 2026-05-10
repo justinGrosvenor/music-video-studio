@@ -60,14 +60,23 @@ resource "aws_iam_role_policy" "task_execution_ssm" {
   role = aws_iam_role.task_execution.id
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = ["ssm:GetParameters", "kms:Decrypt"]
-      Resource = [
-        "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${local.ssm_prefix}/*",
-        "*"
-      ]
-    }]
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["ssm:GetParameters"]
+        Resource = [
+          "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${local.ssm_prefix}/*"
+        ]
+      },
+      {
+        # KMS Decrypt is required to read SecureString parameters. The default
+        # SSM key (alias/aws/ssm) doesn't accept a tight resource ARN here, so
+        # we leave the resource wildcard but scope the action to Decrypt only.
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = "*"
+      }
+    ]
   })
 }
 

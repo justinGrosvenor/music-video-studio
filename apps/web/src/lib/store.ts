@@ -143,7 +143,6 @@ type State = {
   zoomFit: () => void;
 
   setJobs: (jobs: Job[] | ((prev: Job[]) => Job[])) => void;
-  clearCompletedJobs: () => void;
 
   splitAtPlayhead: () => { ok: true; at: number } | { ok: false; reason: string };
   mergeWithRight: (clipId: string) => { ok: true } | { ok: false; reason: string };
@@ -209,7 +208,13 @@ export const useStore = create<State>()(
         const s = result.data;
         const clips = (s.clips ?? []).map((c) =>
           c.status === "queued" || c.status === "generating"
-            ? { ...c, status: "empty" as const, generationTaskId: undefined }
+            ? {
+                ...c,
+                status: "empty" as const,
+                generationTaskId: undefined,
+                videoUrl: undefined,
+                thumbnailUrl: undefined,
+              }
             : c
         );
         set({
@@ -309,8 +314,6 @@ export const useStore = create<State>()(
 
       setJobs: (jobs) =>
         set((s) => ({ jobs: typeof jobs === "function" ? jobs(s.jobs) : jobs })),
-      clearCompletedJobs: () =>
-        set((s) => ({ jobs: s.jobs.filter((j) => j.state === "queued" || j.state === "running") })),
 
       splitPreviewTime: () => {
         const { clips, playhead, analysis } = get();
@@ -358,7 +361,6 @@ export const useStore = create<State>()(
           generationTaskId: wasReady ? undefined : target.generationTaskId,
           prompt: wasReady ? undefined : target.prompt,
           lastError: undefined,
-          continuity: undefined,
         };
 
         const next = [...clips.slice(0, idx), left, right, ...clips.slice(idx + 1)];
@@ -398,7 +400,6 @@ export const useStore = create<State>()(
             thumbnailUrl: undefined,
             generationTaskId: undefined,
             lastError: undefined,
-            continuity: undefined,
           });
           const trimLeft = (c: Clip, newEnd: number): Clip => {
             const updated = { ...c, end: newEnd };
@@ -437,7 +438,6 @@ export const useStore = create<State>()(
           thumbnailUrl: undefined,
           generationTaskId: undefined,
           lastError: undefined,
-          continuity: undefined,
         };
         const next = [...clips.slice(0, idx), merged, ...clips.slice(idx + 2)];
         set({ clips: next, selectedClipId: merged.id });
@@ -467,10 +467,11 @@ export const useStore = create<State>()(
           zoom: s.zoom,
           playhead: s.playhead,
         }) as Partial<State>,
-      // On rehydrate, any clip that was mid-generation is now stale —
-      // its task ID points at a completion the runtime no longer tracks.
-      // Reset to empty so the user can re-enqueue if needed; their prompt
-      // and source choice are preserved.
+      // On rehydrate, any clip that was in the local queue is now stale (the
+      // queue is process-memory, gone after reload). Reset those to empty so
+      // the user can re-enqueue. Clips already "generating" keep their state
+      // and generationTaskId so Editor.resumeInflightJobs can reattach to the
+      // server-side task. Prompt and source choice are preserved either way.
       merge: (persisted, current) => {
         const result = ProjectSnapshot.safeParse(persisted);
         if (!result.success) {
@@ -482,7 +483,13 @@ export const useStore = create<State>()(
         const ps = result.data;
         const clips = (ps.clips ?? []).map((c) =>
           c.status === "queued"
-            ? { ...c, status: "empty" as const, generationTaskId: undefined }
+            ? {
+                ...c,
+                status: "empty" as const,
+                generationTaskId: undefined,
+                videoUrl: undefined,
+                thumbnailUrl: undefined,
+              }
             : c
         );
         return { ...current, ...ps, clips };

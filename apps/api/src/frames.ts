@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { readFile, unlink } from "node:fs/promises";
 import { storage } from "./storage.js";
 import { runFfmpeg } from "./ffmpeg.js";
+import { assertSafeHost } from "./net.js";
 
 /** Extract the last frame of a video URL and persist it as a JPEG.
  *
@@ -11,6 +12,7 @@ import { runFfmpeg } from "./ffmpeg.js";
  * fetchable by Runway and the frontend.
  */
 export async function extractLastFrame(videoUrl: string, time?: number): Promise<{ url: string }> {
+  if (/^https?:\/\//i.test(videoUrl)) await assertSafeHost(videoUrl);
   // PNG instead of JPEG: Veo's outputs ship as yuv420p with a
   // non-full-range tag, and ffmpeg's mjpeg encoder rejects that with
   // "Non full-range YUV is non-standard / ff_frame_thread_encoder_init

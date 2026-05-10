@@ -33,6 +33,7 @@ export const Clip = z.object({
     "generated",
     "textToVideo",
     "library",
+    "upload",
     "lipSync",
     "actTwo",
     "aleph",
@@ -40,8 +41,6 @@ export const Clip = z.object({
   model: GenerationModel.optional(),
   /** When source = "archetype": which lookbook image to seed from. */
   archetypeUrl: z.string().optional(),
-  /** When source = "continue": enrich prompt with motion from previous clip. */
-  continuity: z.boolean().optional(),
   /** When source = "continue" and both neighbors are ready: send the prev's
    *  last frame AND the next's first frame so Runway interpolates between them. */
   bridge: z.boolean().optional(),

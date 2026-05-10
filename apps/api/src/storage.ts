@@ -26,9 +26,16 @@ const UPLOADS = join(config.STORAGE_DIR, "uploads");
 const ANALYSES = join(config.STORAGE_DIR, "analyses");
 const RENDERS = join(config.STORAGE_DIR, "renders");
 
-await ensureDir(UPLOADS);
-await ensureDir(ANALYSES);
-await ensureDir(RENDERS);
+// Only the local backend writes to these directories. In s3 mode the API
+// streams directly to S3 — creating empty dirs here would just clutter the
+// Fargate disk. RENDERS is still needed transiently in s3 mode (ffmpeg
+// writes the mp4 there before saveRender ships it), but `renderTimeline`
+// already runs `mkdir(paths.RENDERS, { recursive: true })` on every call.
+if (config.STORAGE_BACKEND === "local") {
+  await ensureDir(UPLOADS);
+  await ensureDir(ANALYSES);
+  await ensureDir(RENDERS);
+}
 
 export async function ensureDir(p: string) {
   if (!existsSync(p)) await mkdir(p, { recursive: true });
@@ -68,8 +75,11 @@ export interface StorageBackend {
     originalName: string,
     contentType?: string
   ): Promise<{ id: string; publicUrl: string }>;
-  /** Persist a finished render produced at a local file path. The local file
-   * is left on disk in case the caller wants it; callers may delete after. */
+  /** Persist a finished render produced at a local file path.
+   *  - local backend: renames the file into the renders/ directory.
+   *  - s3 backend: uploads the bytes; the local file is left on disk and the
+   *    caller is expected to unlink it (renderTimeline does so on Fargate
+   *    where the 20 GiB ephemeral disk would otherwise fill up). */
   saveRender(localPath: string, key: string, contentType?: string): Promise<{ publicUrl: string }>;
 
   /** Write a JSON metadata document at `key`. Overwrites any existing object. */
@@ -233,8 +243,10 @@ class S3Backend implements StorageBackend {
         Key: key,
         Body: JSON.stringify(data),
         ContentType: "application/json",
-        // Metadata: no immutable caching — these get overwritten.
-        CacheControl: "no-cache",
+        // Metadata JSON gets overwritten on every save; tell any caches not
+        // to keep a copy. (`no-cache` would still allow stale-while-revalidate
+        // semantics — `no-store` is the no-caching directive we actually want.)
+        CacheControl: "no-store, max-age=0",
       })
     );
   }

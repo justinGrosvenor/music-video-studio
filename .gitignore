@@ -8,6 +8,7 @@ build
 
 .DS_Store
 .idea
+.claude/
 *.tsbuildinfo
 .eslintcache
 .cache
@@ -21,9 +22,10 @@ __pycache__
 *.pyc
 
 # Runtime storage tree — uploads, renders, analysis cache, saved projects/clips.
-# All regeneratable or user-data; never commit to source.
-storage/
-apps/api/storage/
+# All regeneratable or user-data; never commit to source. Anchored to known
+# locations so it doesn't eat infra/modules/storage/ or similar.
+/storage/
+/apps/api/storage/
 
 .terragrunt-cache
 .terraform

@@ -61,10 +61,10 @@ export function Timeline() {
     }
     const clip = useStore.getState().clips.find((c) => c.id === clipId);
     if (!clip) return;
-    updateClip(clipId, { status: "generating" } as any);
+    updateClip(clipId, { status: "generating" });
     try {
       const { url } = await uploadVideo(file);
-      updateClip(clipId, { status: "ready", videoUrl: url, source: "upload" } as any);
+      updateClip(clipId, { status: "ready", videoUrl: url, source: "upload" });
       toast.success("Video added");
 
       void saveClipToServer({
@@ -83,7 +83,7 @@ export function Timeline() {
         })
         .catch((err) => console.warn("auto-save dropped clip failed", err));
     } catch {
-      updateClip(clipId, { status: "empty" } as any);
+      updateClip(clipId, { status: "empty" });
       toast.error("Upload failed");
     }
   }, [updateClip]);
@@ -381,7 +381,7 @@ export function Timeline() {
                           tabIndex={-1}
                           onClick={(e) => {
                             e.stopPropagation();
-                            updateClip(c.id, { status: "empty", videoUrl: undefined, generationTaskId: undefined, lastError: undefined } as any);
+                            updateClip(c.id, { status: "empty", videoUrl: undefined, generationTaskId: undefined, lastError: undefined });
                           }}
                           title="Clear clip"
                         >

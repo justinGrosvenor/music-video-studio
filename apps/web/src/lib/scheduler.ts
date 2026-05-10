@@ -221,17 +221,6 @@ export function cancelJob(jobId: string): void {
   pump();
 }
 
-export function queueStats(): { queued: number; running: number; total: number } {
-  const { jobs } = useStore.getState();
-  let queued = 0;
-  let running = 0;
-  for (const j of jobs) {
-    if (j.state === "queued") queued++;
-    else if (j.state === "running") running++;
-  }
-  return { queued, running, total: queued + running };
-}
-
 function isResolved(state: JobState): boolean {
   return state === "succeeded" || state === "failed" || state === "cancelled";
 }

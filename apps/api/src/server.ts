@@ -29,7 +29,6 @@ import {
   listAvatars,
   RunwayRateLimitError,
 } from "./runway.js";
-import { renderExists } from "./render.js";
 import { submitRender, getRenderJob } from "./render_queue.js";
 import { FfmpegError } from "./ffmpeg.js";
 import { extractLastFrame } from "./frames.js";
@@ -123,8 +122,8 @@ app.get("/health", async () => ({ ok: true }));
 
 // Magic-byte sniffing — MIME headers are caller-controlled and can lie.
 // Returns true if the buffer's first bytes match a known signature for the
-// declared family (audio | image).
-function sniffMatches(buf: Buffer, family: "audio" | "image"): boolean {
+// declared family (audio | image | video).
+function sniffMatches(buf: Buffer, family: "audio" | "image" | "video"): boolean {
   if (buf.length < 12) return false;
   const u = (i: number) => buf.readUInt8(i);
   const ascii = (start: number, len: number) =>
@@ -137,6 +136,15 @@ function sniffMatches(buf: Buffer, family: "audio" | "image"): boolean {
     if (ascii(0, 4) === "fLaC") return true; // flac
     if (ascii(0, 4) === "OggS") return true; // ogg/opus
     if (ascii(4, 4) === "ftyp") return true; // m4a/aac-in-mp4
+    return false;
+  }
+
+  if (family === "video") {
+    if (ascii(4, 4) === "ftyp") return true; // mp4/mov/m4v
+    if (ascii(0, 4) === "RIFF" && ascii(8, 4) === "AVI ") return true; // avi
+    // webm/mkv — EBML header starts with 1A 45 DF A3
+    if (u(0) === 0x1a && u(1) === 0x45 && u(2) === 0xdf && u(3) === 0xa3) return true;
+    if (ascii(0, 4) === "OggS") return true; // ogv
     return false;
   }
 
@@ -198,6 +206,9 @@ app.post("/api/videos/upload", { config: { rateLimit: { max: 20, timeWindow: "1 
     return reply.code(400).send({ error: `expected video, got ${file.mimetype}` });
   }
   const buf = await file.toBuffer();
+  if (!sniffMatches(buf, "video")) {
+    return reply.code(400).send({ error: "file content is not a recognized video format" });
+  }
   const { id, publicUrl } = await saveUpload(buf, file.filename, file.mimetype);
   return reply.send({ id, url: publicUrl });
 });
@@ -388,18 +399,6 @@ app.get("/api/render/jobs/:renderId", async (req, reply) => {
   const job = getRenderJob(params.renderId);
   if (!job) return reply.code(404).send({ error: "render job not found" });
   return reply.send(job);
-});
-
-app.get("/api/render/:projectId", async (req, reply) => {
-  const params = z.object({ projectId: SafeId }).parse(req.params);
-  // Only the local backend knows about local files; S3 callers should track
-  // the URL returned from the render-job poll themselves.
-  if (renderExists(params.projectId)) {
-    return reply.send({
-      url: `${config.PUBLIC_BASE_URL}/storage/renders/${params.projectId}.mp4`,
-    });
-  }
-  return reply.code(404).send({ error: "not rendered" });
 });
 
 // Projects / Library ----------------------------------------------------
