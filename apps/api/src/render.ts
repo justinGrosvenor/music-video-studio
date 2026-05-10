@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { paths, storage } from "./storage.js";
 import { config } from "./config.js";
 import { runFfmpeg, probeDuration } from "./ffmpeg.js";
@@ -130,8 +130,7 @@ export async function renderTimeline(req: RenderRequest): Promise<{ url: string 
 }
 
 export async function writeRenderManifest(projectId: string, req: RenderRequest): Promise<void> {
-  const path = join(paths.RENDERS, `${projectId}.manifest.json`);
-  await writeFile(path, JSON.stringify(req, null, 2));
+  await storage.saveJson(`renders/${projectId}.manifest.json`, req);
 }
 
 export function renderExists(projectId: string): boolean {

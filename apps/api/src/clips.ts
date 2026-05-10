@@ -1,18 +1,10 @@
-import { writeFile, readFile, readdir, rm } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { config } from "./config.js";
-import { ensureDir } from "./storage.js";
+import { storage } from "./storage.js";
 import { rehostExternalUrl } from "./rehost.js";
 import type { SavedClip } from "@mvs/shared";
 
-const CLIPS_DIR = join(config.STORAGE_DIR, "clips");
-await ensureDir(CLIPS_DIR);
-
-function clipDir(id: string) {
-  return join(CLIPS_DIR, id);
+function clipMetaKey(id: string): string {
+  return `clips/${id}/clip.json`;
 }
-
 
 export async function saveClip(input: {
   id: string;
@@ -23,15 +15,12 @@ export async function saveClip(input: {
   duration: number;
   sectionLabel: string | null;
 }): Promise<SavedClip> {
-  const dir = clipDir(input.id);
-  await ensureDir(dir);
-
   // rehostExternalUrl is the single source of truth for "make this URL
   // durable on our storage backend": owned URLs (already on /storage or
   // our S3 bucket) pass through; external URLs (Runway etc.) get downloaded
   // and re-uploaded via storage.saveUpload, so the result is always on the
-  // configured backend (S3 in prod, local disk in dev). The metadata json
-  // we write below stays in this per-id directory either way.
+  // configured backend (S3 in prod, local disk in dev). Metadata goes through
+  // the same backend, so saved clips persist across container restarts.
   const videoUrl = await rehostExternalUrl(input.videoUrl, ".mp4");
 
   const saved: SavedClip = {
@@ -45,31 +34,24 @@ export async function saveClip(input: {
     savedAt: new Date().toISOString(),
   };
 
-  await writeFile(join(dir, "clip.json"), JSON.stringify(saved, null, 2));
+  await storage.saveJson(clipMetaKey(input.id), saved);
   return saved;
 }
 
 export async function listClips(): Promise<SavedClip[]> {
-  if (!existsSync(CLIPS_DIR)) return [];
-  const entries = await readdir(CLIPS_DIR, { withFileTypes: true });
+  const keys = await storage.listJson("clips/");
   const clips: SavedClip[] = [];
-
-  for (const e of entries) {
-    if (!e.isDirectory()) continue;
-    const metaPath = join(CLIPS_DIR, e.name, "clip.json");
-    if (!existsSync(metaPath)) continue;
+  for (const key of keys) {
+    if (!key.endsWith("/clip.json")) continue;
     try {
-      clips.push(JSON.parse(await readFile(metaPath, "utf8")) as SavedClip);
+      const c = await storage.loadJson<SavedClip>(key);
+      if (c) clips.push(c);
     } catch { /* skip corrupt */ }
   }
-
   clips.sort((a, b) => b.savedAt.localeCompare(a.savedAt));
   return clips;
 }
 
 export async function deleteClip(id: string): Promise<boolean> {
-  const dir = clipDir(id);
-  if (!existsSync(dir)) return false;
-  await rm(dir, { recursive: true, force: true });
-  return true;
+  return storage.deleteJson(clipMetaKey(id));
 }

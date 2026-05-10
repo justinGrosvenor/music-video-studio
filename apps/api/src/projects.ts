@@ -1,43 +1,41 @@
-import { mkdir, writeFile, readFile, readdir, rm, copyFile, stat } from "node:fs/promises";
+import { copyFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { config } from "./config.js";
-import { ensureDir } from "./storage.js";
+import { ensureDir, storage } from "./storage.js";
 import { resolveLocalPath } from "./paths.js";
 import type { ProjectMeta, SavedProject } from "@mvs/shared";
 
-const PROJECTS_DIR = join(config.STORAGE_DIR, "projects");
-await ensureDir(PROJECTS_DIR);
-
-function projectDir(id: string) {
-  return join(PROJECTS_DIR, id);
+function projectMetaKey(id: string): string {
+  return `projects/${id}/project.json`;
 }
-
 
 export async function saveProject(
   id: string,
   name: string,
   state: Record<string, unknown>,
 ): Promise<ProjectMeta> {
-  const dir = projectDir(id);
-  await ensureDir(dir);
-  const filesDir = join(dir, "files");
-  await ensureDir(filesDir);
-
+  // In local-backend dev mode we additionally snapshot referenced local files
+  // into the project's folder so the saved project keeps working even if the
+  // ephemeral upload is cleaned up. In s3-backend mode every referenced URL
+  // is already on durable storage (rehosted) so we just persist the metadata.
   const copiedFiles = new Map<string, string>();
-  const fileUrls = collectUrls(state);
-
-  for (const url of fileUrls) {
-    const localPath = resolveLocalPath(url);
-    if (!localPath || !existsSync(localPath)) continue;
-    const filename = basename(localPath);
-    const dest = join(filesDir, filename);
-    if (!existsSync(dest)) await copyFile(localPath, dest);
-    copiedFiles.set(url, `${config.PUBLIC_BASE_URL}/storage/projects/${id}/files/${filename}`);
+  if (config.STORAGE_BACKEND === "local") {
+    const dir = join(config.STORAGE_DIR, "projects", id);
+    const filesDir = join(dir, "files");
+    await ensureDir(filesDir);
+    for (const url of collectUrls(state)) {
+      const localPath = resolveLocalPath(url);
+      if (!localPath || !existsSync(localPath)) continue;
+      const filename = basename(localPath);
+      const dest = join(filesDir, filename);
+      if (!existsSync(dest)) await copyFile(localPath, dest);
+      copiedFiles.set(url, `${config.PUBLIC_BASE_URL}/storage/projects/${id}/files/${filename}`);
+    }
   }
 
   const rewritten = JSON.parse(JSON.stringify(state)) as JsonMutable;
-  rewriteUrls(rewritten, copiedFiles);
+  if (copiedFiles.size > 0) rewriteUrls(rewritten, copiedFiles);
 
   let thumbnailUrl: string | null = null;
   const clips = state.clips;
@@ -48,24 +46,31 @@ export async function saveProject(
 
   const savedAt = new Date().toISOString();
   const meta: ProjectMeta = { id, name, savedAt, thumbnailUrl };
-  const saved: SavedProject = { ...meta, state: rewritten as Record<string, unknown>, files: [...copiedFiles.values()] };
+  const saved: SavedProject = {
+    ...meta,
+    state: rewritten as Record<string, unknown>,
+    files: [...copiedFiles.values()],
+  };
 
-  await writeFile(join(dir, "project.json"), JSON.stringify(saved, null, 2));
+  await storage.saveJson(projectMetaKey(id), saved);
   return meta;
 }
 
 export async function listProjects(): Promise<ProjectMeta[]> {
-  if (!existsSync(PROJECTS_DIR)) return [];
-  const entries = await readdir(PROJECTS_DIR, { withFileTypes: true });
+  const keys = await storage.listJson("projects/");
   const metas: ProjectMeta[] = [];
 
-  for (const e of entries) {
-    if (!e.isDirectory()) continue;
-    const metaPath = join(PROJECTS_DIR, e.name, "project.json");
-    if (!existsSync(metaPath)) continue;
+  for (const key of keys) {
+    if (!key.endsWith("/project.json")) continue;
     try {
-      const raw = JSON.parse(await readFile(metaPath, "utf8")) as SavedProject;
-      metas.push({ id: raw.id, name: raw.name, savedAt: raw.savedAt, thumbnailUrl: raw.thumbnailUrl });
+      const raw = await storage.loadJson<SavedProject>(key);
+      if (!raw) continue;
+      metas.push({
+        id: raw.id,
+        name: raw.name,
+        savedAt: raw.savedAt,
+        thumbnailUrl: raw.thumbnailUrl,
+      });
     } catch { /* skip corrupt */ }
   }
 
@@ -74,38 +79,30 @@ export async function listProjects(): Promise<ProjectMeta[]> {
 }
 
 export async function loadProject(id: string): Promise<SavedProject | null> {
-  const metaPath = join(projectDir(id), "project.json");
-  if (!existsSync(metaPath)) return null;
-  return JSON.parse(await readFile(metaPath, "utf8")) as SavedProject;
+  return storage.loadJson<SavedProject>(projectMetaKey(id));
 }
 
 export async function deleteProject(id: string): Promise<boolean> {
-  const dir = projectDir(id);
-  if (!existsSync(dir)) return false;
-  await rm(dir, { recursive: true, force: true });
-  return true;
+  const existed = await storage.deleteJson(projectMetaKey(id));
+  // Clean up the on-disk files snapshot we made in local-backend mode.
+  if (config.STORAGE_BACKEND === "local") {
+    const dir = join(config.STORAGE_DIR, "projects", id);
+    if (existsSync(dir)) await rm(dir, { recursive: true, force: true });
+  }
+  return existed;
 }
 
 export async function listRenders(): Promise<Array<{ name: string; url: string; size: number; modifiedAt: string }>> {
-  const rendersDir = join(config.STORAGE_DIR, "renders");
-  if (!existsSync(rendersDir)) return [];
-  const entries = await readdir(rendersDir);
-  const renders: Array<{ name: string; url: string; size: number; modifiedAt: string }> = [];
-
-  for (const name of entries) {
-    if (!name.endsWith(".mp4")) continue;
-    const filePath = join(rendersDir, name);
-    const s = await stat(filePath);
-    renders.push({
-      name,
-      url: `${config.PUBLIC_BASE_URL}/storage/renders/${name}`,
-      size: s.size,
-      modifiedAt: s.mtime.toISOString(),
-    });
-  }
-
-  renders.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
-  return renders;
+  const files = await storage.listFiles("renders/");
+  return files
+    .filter((f) => f.key.endsWith(".mp4"))
+    .map((f) => ({
+      name: basename(f.key),
+      url: f.publicUrl,
+      size: f.size,
+      modifiedAt: f.modifiedAt,
+    }))
+    .sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
 }
 
 type JsonMutable =

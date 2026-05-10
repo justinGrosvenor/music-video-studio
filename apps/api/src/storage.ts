@@ -1,8 +1,16 @@
 import { createHash } from "node:crypto";
-import { mkdir, writeFile, readFile, rename, rm } from "node:fs/promises";
+import { mkdir, writeFile, readFile, rename, rm, readdir, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, extname } from "node:path";
-import { S3Client, PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
+import { join, extname, dirname } from "node:path";
+import {
+  S3Client,
+  PutObjectCommand,
+  HeadObjectCommand,
+  GetObjectCommand,
+  DeleteObjectCommand,
+  ListObjectsV2Command,
+  type _Object,
+} from "@aws-sdk/client-s3";
 import { AudioAnalysis } from "@mvs/shared";
 import { config } from "./config.js";
 import { mimeType } from "./paths.js";
@@ -32,13 +40,26 @@ export function hashBuffer(buf: Buffer): string {
 
 export const paths = { UPLOADS, ANALYSES, RENDERS };
 
+export interface FileEntry {
+  /** Key relative to the storage root (e.g. "renders/abc.mp4"). */
+  key: string;
+  publicUrl: string;
+  size: number;
+  modifiedAt: string;
+}
+
 // --- Storage backend abstraction ---------------------------------------
 //
 // Two implementations:
 //   - local: writes to STORAGE_DIR; URLs go through Fastify's static serve.
-//     Fine for dev. On Fargate, container-local disk is ephemeral.
+//     Fine for dev. On Fargate, container-local disk is ephemeral, so
+//     production runs the s3 backend.
 //   - s3:    PutObject to S3_BUCKET; URLs are virtual-hosted-style or
 //            S3_PUBLIC_URL_BASE (CloudFront). Survives container restarts.
+//
+// Both backends expose JSON metadata helpers (saveJson/loadJson/...) so
+// project, clip, image and analysis sidecars persist across task replacement
+// on Fargate (previously these were node-fs writes to ephemeral disk).
 
 export interface StorageBackend {
   /** Persist an uploaded blob. Idempotent on content (same buffer → same id). */
@@ -50,9 +71,29 @@ export interface StorageBackend {
   /** Persist a finished render produced at a local file path. The local file
    * is left on disk in case the caller wants it; callers may delete after. */
   saveRender(localPath: string, key: string, contentType?: string): Promise<{ publicUrl: string }>;
+
+  /** Write a JSON metadata document at `key`. Overwrites any existing object. */
+  saveJson(key: string, data: unknown): Promise<void>;
+  /** Read+parse a JSON metadata document. Returns null when missing. */
+  loadJson<T>(key: string): Promise<T | null>;
+  /** Return every `.json` key under `prefix` (recursive). */
+  listJson(prefix: string): Promise<string[]>;
+  /** Remove a JSON metadata document. Returns true when it existed. */
+  deleteJson(key: string): Promise<boolean>;
+
+  /** List arbitrary files (e.g. renders/*.mp4). Recursive. */
+  listFiles(prefix: string): Promise<FileEntry[]>;
 }
 
 class LocalBackend implements StorageBackend {
+  private fsPath(key: string): string {
+    return join(config.STORAGE_DIR, key);
+  }
+
+  private publicUrl(key: string): string {
+    return `${config.PUBLIC_BASE_URL}/storage/${key}`;
+  }
+
   async saveUpload(buf: Buffer, originalName: string) {
     const id = hashBuffer(buf);
     const ext = extname(originalName) || ".bin";
@@ -63,18 +104,70 @@ class LocalBackend implements StorageBackend {
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
     }
-    return {
-      id,
-      publicUrl: `${config.PUBLIC_BASE_URL}/storage/uploads/${filename}`,
-    };
+    return { id, publicUrl: this.publicUrl(`uploads/${filename}`) };
   }
 
   async saveRender(localPath: string, key: string) {
-    // The render is already where Fastify's static handler can serve it.
-    // We just need to make sure it's at storage/renders/<key>.
     const dest = join(RENDERS, key);
     if (localPath !== dest) await rename(localPath, dest);
-    return { publicUrl: `${config.PUBLIC_BASE_URL}/storage/renders/${key}` };
+    return { publicUrl: this.publicUrl(`renders/${key}`) };
+  }
+
+  async saveJson(key: string, data: unknown): Promise<void> {
+    const path = this.fsPath(key);
+    await ensureDir(dirname(path));
+    await writeFile(path, JSON.stringify(data, null, 2));
+  }
+
+  async loadJson<T>(key: string): Promise<T | null> {
+    const path = this.fsPath(key);
+    if (!existsSync(path)) return null;
+    return JSON.parse(await readFile(path, "utf8")) as T;
+  }
+
+  async listJson(prefix: string): Promise<string[]> {
+    const dir = this.fsPath(prefix);
+    if (!existsSync(dir)) return [];
+    const out: string[] = [];
+    await walkDir(dir, async (filePath) => {
+      if (!filePath.endsWith(".json")) return;
+      const rel = filePath.slice(config.STORAGE_DIR.length + 1).split("\\").join("/");
+      out.push(rel);
+    });
+    return out;
+  }
+
+  async deleteJson(key: string): Promise<boolean> {
+    const path = this.fsPath(key);
+    if (!existsSync(path)) return false;
+    await rm(path, { force: true });
+    return true;
+  }
+
+  async listFiles(prefix: string): Promise<FileEntry[]> {
+    const dir = this.fsPath(prefix);
+    if (!existsSync(dir)) return [];
+    const out: FileEntry[] = [];
+    await walkDir(dir, async (filePath) => {
+      const s = await stat(filePath);
+      const rel = filePath.slice(config.STORAGE_DIR.length + 1).split("\\").join("/");
+      out.push({
+        key: rel,
+        publicUrl: this.publicUrl(rel),
+        size: s.size,
+        modifiedAt: s.mtime.toISOString(),
+      });
+    });
+    return out;
+  }
+}
+
+async function walkDir(dir: string, visit: (filePath: string) => Promise<void>): Promise<void> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  for (const e of entries) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) await walkDir(p, visit);
+    else if (e.isFile()) await visit(p);
   }
 }
 
@@ -133,6 +226,75 @@ class S3Backend implements StorageBackend {
     return { publicUrl: this.url(objectKey) };
   }
 
+  async saveJson(key: string, data: unknown): Promise<void> {
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Body: JSON.stringify(data),
+        ContentType: "application/json",
+        // Metadata: no immutable caching — these get overwritten.
+        CacheControl: "no-cache",
+      })
+    );
+  }
+
+  async loadJson<T>(key: string): Promise<T | null> {
+    try {
+      const res = await this.client.send(
+        new GetObjectCommand({ Bucket: this.bucket, Key: key })
+      );
+      const body = await res.Body?.transformToString();
+      if (!body) return null;
+      return JSON.parse(body) as T;
+    } catch (err: unknown) {
+      if (isNoSuchKey(err)) return null;
+      throw err;
+    }
+  }
+
+  async listJson(prefix: string): Promise<string[]> {
+    const all = await this.listAll(prefix);
+    return all.filter((o) => o.Key?.endsWith(".json")).map((o) => o.Key!);
+  }
+
+  async deleteJson(key: string): Promise<boolean> {
+    // S3 DeleteObject is idempotent and doesn't tell us if the key existed.
+    // Do a HEAD first so callers (e.g. DELETE /projects/:id) can return 404.
+    if (!(await this.head(key))) return false;
+    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+    return true;
+  }
+
+  async listFiles(prefix: string): Promise<FileEntry[]> {
+    const all = await this.listAll(prefix);
+    return all
+      .filter((o) => o.Key)
+      .map((o) => ({
+        key: o.Key!,
+        publicUrl: this.url(o.Key!),
+        size: o.Size ?? 0,
+        modifiedAt: o.LastModified?.toISOString() ?? new Date(0).toISOString(),
+      }));
+  }
+
+  private async listAll(prefix: string): Promise<_Object[]> {
+    const out: _Object[] = [];
+    let ContinuationToken: string | undefined;
+    do {
+      const page = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: this.bucket,
+          Prefix: prefix,
+          ContinuationToken,
+        })
+      );
+      out.push(...(page.Contents ?? []));
+      ContinuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (ContinuationToken);
+    return out;
+  }
+
   private async head(key: string): Promise<boolean> {
     try {
       await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
@@ -143,6 +305,12 @@ class S3Backend implements StorageBackend {
   }
 }
 
+function isNoSuchKey(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { name?: string; Code?: string; $metadata?: { httpStatusCode?: number } };
+  return e.name === "NoSuchKey" || e.Code === "NoSuchKey" || e.$metadata?.httpStatusCode === 404;
+}
+
 export const storage: StorageBackend =
   config.STORAGE_BACKEND === "s3" ? new S3Backend() : new LocalBackend();
 
@@ -151,18 +319,14 @@ export async function saveUpload(buf: Buffer, originalName: string, contentType?
   return storage.saveUpload(buf, originalName, contentType);
 }
 
-// --- Analysis cache (always local; cheap to recompute) -------------------
+// --- Analysis cache ------------------------------------------------------
+// Lives at analyses/<songId>.json (or .error.json / .vocal.json). Goes
+// through the storage backend so cached analyses survive task replacement
+// (S3 in prod, local disk in dev).
 
 export async function readAnalysis(songId: string): Promise<AudioAnalysis | null> {
-  const path = join(ANALYSES, `${songId}.json`);
-  if (!existsSync(path)) return null;
-  const raw = await readFile(path, "utf8");
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new CorruptAnalysisError(`analysis cache for ${songId} is not valid JSON`);
-  }
+  const parsed = await storage.loadJson<unknown>(`analyses/${songId}.json`);
+  if (!parsed) return null;
   const result = AudioAnalysis.safeParse(parsed);
   if (!result.success) {
     throw new CorruptAnalysisError(
@@ -173,40 +337,27 @@ export async function readAnalysis(songId: string): Promise<AudioAnalysis | null
 }
 
 export async function writeAnalysis(songId: string, data: AudioAnalysis): Promise<void> {
-  const path = join(ANALYSES, `${songId}.json`);
-  await writeFile(path, JSON.stringify(data, null, 2));
+  await storage.saveJson(`analyses/${songId}.json`, data);
 }
 
 export async function writeAnalysisError(songId: string, error: string): Promise<void> {
-  const path = join(ANALYSES, `${songId}.error`);
-  await writeFile(path, error);
+  await storage.saveJson(`analyses/${songId}.error.json`, { error });
 }
 
 export async function readAnalysisError(songId: string): Promise<string | null> {
-  const path = join(ANALYSES, `${songId}.error`);
-  if (!existsSync(path)) return null;
-  return readFile(path, "utf8");
+  const parsed = await storage.loadJson<{ error?: string }>(`analyses/${songId}.error.json`);
+  return parsed?.error ?? null;
 }
 
 export async function clearAnalysisError(songId: string): Promise<void> {
-  const path = join(ANALYSES, `${songId}.error`);
-  if (!existsSync(path)) return;
-  await rm(path, { force: true });
+  await storage.deleteJson(`analyses/${songId}.error.json`);
 }
 
 export async function readVocalStemUrl(songId: string): Promise<string | null> {
-  const path = join(ANALYSES, `${songId}.vocal.json`);
-  if (!existsSync(path)) return null;
-  const raw = await readFile(path, "utf8");
-  try {
-    const obj = JSON.parse(raw);
-    return typeof obj.url === "string" ? obj.url : null;
-  } catch {
-    return null;
-  }
+  const parsed = await storage.loadJson<{ url?: string }>(`analyses/${songId}.vocal.json`);
+  return typeof parsed?.url === "string" ? parsed.url : null;
 }
 
 export async function writeVocalStemUrl(songId: string, url: string): Promise<void> {
-  const path = join(ANALYSES, `${songId}.vocal.json`);
-  await writeFile(path, JSON.stringify({ url }, null, 2));
+  await storage.saveJson(`analyses/${songId}.vocal.json`, { url });
 }
