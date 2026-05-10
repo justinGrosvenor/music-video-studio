@@ -381,15 +381,38 @@ export const useStore = create<State>()(
           if (lo >= hi) return s;
           const t = clamp(newTime, lo, hi);
 
-          // Resizing a generated clip resets its video — the new region maps
-          // to a different audio range, so the prior render is no longer valid.
-          const trimmed = (c: Clip): Clip =>
-            c.status === "ready"
-              ? { ...c, status: "empty", videoUrl: undefined, thumbnailUrl: undefined, generationTaskId: undefined, lastError: undefined, continuity: undefined }
-              : c;
+          // Non-lipSync clips: renderer + preview both stretch to the new
+          // slot duration. Keep the videoUrl, no work lost.
+          //
+          // LipSync clips: the avatar mouth is locked to a specific audio
+          // range, and the renderer respects that by NOT time-stretching
+          // them — it trims instead. So we can keep the videoUrl ONLY for
+          // the LEFT clip when its end is shrinking (the new slot is a
+          // strict prefix of the old one, so the existing lip-sync
+          // covers it). The RIGHT clip's start moves, so the lip-sync no
+          // longer aligns to the audio at frame 0; that has to regenerate.
+          const wipe = (c: Clip): Clip => ({
+            ...c,
+            status: "empty",
+            videoUrl: undefined,
+            thumbnailUrl: undefined,
+            generationTaskId: undefined,
+            lastError: undefined,
+            continuity: undefined,
+          });
+          const trimLeft = (c: Clip, newEnd: number): Clip => {
+            const updated = { ...c, end: newEnd };
+            if (c.status !== "ready" || c.source !== "lipSync") return updated;
+            return newEnd < c.end ? updated : wipe(updated);
+          };
+          const trimRight = (c: Clip, newStart: number): Clip => {
+            const updated = { ...c, start: newStart };
+            if (c.status !== "ready" || c.source !== "lipSync") return updated;
+            return wipe(updated);
+          };
 
-          const newLeft = trimmed({ ...left, end: t });
-          const newRight = trimmed({ ...right, start: t });
+          const newLeft = trimLeft(left, t);
+          const newRight = trimRight(right, t);
           return {
             clips: [...s.clips.slice(0, idx - 1), newLeft, newRight, ...s.clips.slice(idx + 1)],
           };

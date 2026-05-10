@@ -344,6 +344,7 @@ const RenderBody = z
             start: z.number().finite().min(0),
             end: z.number().finite().positive(),
             videoUrl: z.string().url(),
+            source: z.string().optional(),
           })
           .refine((c) => c.end > c.start, {
             message: "clip end must be greater than start",

@@ -171,7 +171,14 @@ export type RenderRequest = {
   projectId: string;
   audioUrl: string;
   duration: number;
-  clips: Array<{ start: number; end: number; videoUrl: string }>;
+  clips: Array<{
+    start: number;
+    end: number;
+    videoUrl: string;
+    /** Forwarded so the renderer can pick the right filter chain
+     *  (lipSync needs a hard trim, not time-stretch). */
+    source?: string;
+  }>;
   fades?: boolean;
 };
 

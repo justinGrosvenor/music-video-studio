@@ -9,6 +9,9 @@ export type RenderClip = {
   start: number;
   end: number;
   videoUrl: string;
+  /** Clip source — only used to gate the lipSync-specific render path
+   *  (no time-stretch, hard trim instead, so lips stay in sync with audio). */
+  source?: string;
 };
 
 export type RenderRequest = {
@@ -69,15 +72,30 @@ export async function renderTimeline(req: RenderRequest): Promise<{ url: string 
     const tagOut = `v${i + 1}`;
     const slotDur = clip.end - clip.start;
     const srcDur = sourceDurations[i]!;
-    // Stretch factor: K > 1 slows the source (fills a longer slot), K < 1
-    // speeds it up (fits a shorter slot). Clamp K to a sane range so a
-    // garbage probe (1ms) doesn't blow the filter graph up.
-    const k = Math.max(0.25, Math.min(8, slotDur / srcDur));
 
-    const baseChain =
+    // Per-source clip processing:
+    //  - lipSync: NEVER time-stretch — that de-syncs the avatar's mouth from
+    //    the song. Trim to slot duration; if the source is shorter than the
+    //    slot the overlay simply stops emitting frames after the source ends
+    //    and the black base shows through (the moveBoundary store guard
+    //    keeps lipSync videos only when the new slot is a strict prefix of
+    //    the original generation, so this case is rare in practice).
+    //  - everything else: time-stretch K = slotDur / srcDur (clamped).
+    let baseChain: string;
+    const scalePad =
       `[${inputIdx}:v]scale=1280:720:force_original_aspect_ratio=decrease,` +
-      `pad=1280:720:(ow-iw)/2:(oh-ih)/2,` +
-      `setpts=(PTS-STARTPTS)*${k.toFixed(6)}+${clip.start.toFixed(6)}/TB`;
+      `pad=1280:720:(ow-iw)/2:(oh-ih)/2`;
+    if (clip.source === "lipSync") {
+      baseChain =
+        `${scalePad},trim=duration=${slotDur.toFixed(6)},` +
+        `setpts=PTS-STARTPTS+${clip.start.toFixed(6)}/TB`;
+    } else {
+      // K > 1 slows the source (fills a longer slot), K < 1 speeds it up
+      // (fits a shorter slot). Clamp K so a garbage probe (1ms) can't blow
+      // the filter graph up.
+      const k = Math.max(0.25, Math.min(8, slotDur / srcDur));
+      baseChain = `${scalePad},setpts=(PTS-STARTPTS)*${k.toFixed(6)}+${clip.start.toFixed(6)}/TB`;
+    }
 
     const fadeChain = req.fades
       ? `,fade=t=in:st=${clip.start}:d=${FADE_DURATION}:alpha=1,` +

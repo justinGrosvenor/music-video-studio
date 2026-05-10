@@ -79,7 +79,12 @@ export function Header() {
     if (!songId || !audioUrl || !analysis) return;
     const ready = clips
       .filter((c) => c.status === "ready" && c.videoUrl)
-      .map((c) => ({ start: c.start, end: c.end, videoUrl: c.videoUrl as string }));
+      .map((c) => ({
+        start: c.start,
+        end: c.end,
+        videoUrl: c.videoUrl as string,
+        source: c.source,
+      }));
     if (!ready.length) {
       toast.warning("No clips ready to render yet");
       return;
