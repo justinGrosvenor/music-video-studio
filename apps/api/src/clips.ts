@@ -38,13 +38,15 @@ export async function saveClip(input: {
   } else if (/^https?:\/\//i.test(input.videoUrl)) {
     // External (Runway) URL: download it so the entry doesn't rot when the
     // remote signed link expires (~24–48h after generation).
+    // Use a unique filename so re-generations don't collide with browser cache.
     const ext = extname(input.videoUrl.split("?")[0] || "") || ".mp4";
+    const tag = Date.now().toString(36);
     videoUrl = await rehostExternalUrl({
       url: input.videoUrl,
       destDir: dir,
       publicPathPrefix: `clips/${input.id}`,
       publicBaseUrl: config.PUBLIC_BASE_URL,
-      filename: `clip${ext}`,
+      filename: `clip-${tag}${ext}`,
       defaultExt: ".mp4",
     });
   }
