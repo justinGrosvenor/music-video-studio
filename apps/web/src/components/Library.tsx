@@ -203,10 +203,27 @@ function ProjectsTab({
     <div className="library-grid">
       {projects.map((p) => (
         <div key={p.id} className="library-card">
-          <div
-            className="library-card-thumb"
-            style={p.thumbnailUrl ? { backgroundImage: `url(${p.thumbnailUrl})` } : undefined}
-          />
+          {p.thumbnailUrl ? (
+            // thumbnailUrl is the videoUrl of the project's first ready
+            // clip — render as a <video> with preload=metadata so the
+            // browser shows the first frame (background-image: url(mp4)
+            // doesn't decode video). Hover to preview-play.
+            <video
+              className="library-card-thumb"
+              src={p.thumbnailUrl}
+              muted
+              playsInline
+              preload="metadata"
+              onMouseEnter={(e) => (e.currentTarget as HTMLVideoElement).play().catch(() => {})}
+              onMouseLeave={(e) => {
+                const v = e.currentTarget as HTMLVideoElement;
+                v.pause();
+                v.currentTime = 0;
+              }}
+            />
+          ) : (
+            <div className="library-card-thumb" />
+          )}
           <div className="library-card-info">
             <div className="library-card-name">{p.name}</div>
             <div className="library-card-date">
