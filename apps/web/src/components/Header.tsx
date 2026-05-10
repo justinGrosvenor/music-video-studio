@@ -20,6 +20,7 @@ export function Header() {
   const getSnapshot = useStore((s) => s.getSnapshot);
   const [renderUrl, setRenderUrl] = useState<string | null>(null);
   const [rendering, setRendering] = useState(false);
+  const [renderLabel, setRenderLabel] = useState<string | null>(null);
   const [fades, setFades] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
@@ -93,20 +94,34 @@ export function Header() {
       useStore.setState({ projectId: renderId });
     }
     setRendering(true);
+    setRenderLabel("Submitting…");
     try {
-      const { url } = await renderTimeline({
-        projectId: renderId,
-        audioUrl,
-        duration: analysis.duration,
-        clips: ready,
-        fades,
-      });
+      const { url } = await renderTimeline(
+        {
+          projectId: renderId,
+          audioUrl,
+          duration: analysis.duration,
+          clips: ready,
+          fades,
+        },
+        {
+          onUpdate: (job) => {
+            if (job.state === "queued") {
+              const ahead = (job.queuePosition ?? 0);
+              setRenderLabel(ahead > 0 ? `Queued (${ahead} ahead)…` : "Queued…");
+            } else if (job.state === "running") {
+              setRenderLabel("Rendering…");
+            }
+          },
+        },
+      );
       setRenderUrl(url);
       toast.success("Render complete");
     } catch (err) {
       toast.error(`Render failed: ${getErrorMessage(err)}`);
     } finally {
       setRendering(false);
+      setRenderLabel(null);
     }
   };
 
@@ -181,7 +196,7 @@ export function Header() {
           )}
           <div className="export-cluster">
             <button type="button" className="btn primary" onClick={onExport} disabled={!analysis || rendering}>
-              {rendering ? "Rendering…" : "Export MP4"}
+              {rendering ? (renderLabel ?? "Rendering…") : "Export MP4"}
             </button>
             {analysis && (
               <RenderOptionsMenu fades={fades} setFades={setFades} />

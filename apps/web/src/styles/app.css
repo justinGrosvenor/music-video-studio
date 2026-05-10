@@ -403,6 +403,15 @@ input, textarea { font: inherit; color: inherit; }
   font-size: 12px;
 }
 .preview-empty .label-big { font-size: 14px; color: var(--text-dim); }
+/* Overlay form: shown on top of the (always-mounted) video elements when
+   no clip sits under the playhead. Lets the videos stay mounted so a
+   scrub-back doesn't desync loadedRef from the actual <video> nodes. */
+.preview-empty-overlay {
+  position: absolute; inset: 0;
+  justify-content: center;
+  background: var(--surface);
+  z-index: 1;
+}
 
 .preview-container {
   position: relative; width: 100%; height: 100%;

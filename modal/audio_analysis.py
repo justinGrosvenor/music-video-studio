@@ -23,6 +23,10 @@ image = (
         "numpy<2",
         "scipy==1.13.1",
         "httpx==0.27.2",
+        # Modal >=1.0 no longer auto-installs FastAPI for fastapi_endpoint
+        # functions — add it explicitly. `fastapi[standard]` pulls in the
+        # extras the modal endpoint runtime expects.
+        "fastapi[standard]==0.119.1",
     )
     .add_local_python_source("audio_core")
 )

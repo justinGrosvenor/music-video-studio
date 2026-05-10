@@ -17,8 +17,8 @@
 set -euo pipefail
 
 TAG="${1:-latest}"
-PROJECT="speed-encode"
-REGION="us-east-1"
+PROJECT="music-video-studio"
+REGION="us-west-2"
 REPO="${PROJECT}-api"
 
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)

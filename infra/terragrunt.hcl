@@ -1,12 +1,13 @@
 # Root Terragrunt config — applies to every leaf stack via `include "root"`.
 #
-# State backend: local for now. Swap to S3 by:
-#   1. Bootstrap an S3 bucket + DynamoDB table out-of-band (one-shot).
-#   2. Replace the `local` block below with the commented `s3` block.
+# State backend: S3 + DynamoDB (locking). The bucket and table are
+# bootstrapped out-of-band:
+#   aws s3api create-bucket --bucket music-video-studio-tfstate ...
+#   aws dynamodb create-table --table-name music-video-studio-tflock ...
 
 locals {
   project = "music-video-studio"
-  region  = "us-east-1"
+  region  = "us-west-2"
 }
 
 generate "provider" {
@@ -14,7 +15,7 @@ generate "provider" {
   if_exists = "overwrite_terragrunt"
   contents  = <<EOF
 terraform {
-  required_version = ">= 1.6"
+  required_version = ">= 1.5"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -36,32 +37,19 @@ EOF
 }
 
 remote_state {
-  backend = "local"
+  backend = "s3"
   generate = {
     path      = "_backend.tf"
     if_exists = "overwrite_terragrunt"
   }
   config = {
-    path = "${get_parent_terragrunt_dir()}/.tfstate/${path_relative_to_include()}/terraform.tfstate"
+    bucket         = "music-video-studio-tfstate"
+    key            = "${path_relative_to_include()}/terraform.tfstate"
+    region         = local.region
+    encrypt        = true
+    dynamodb_table = "music-video-studio-tflock"
   }
 }
-
-# Use this once an S3 bucket exists:
-#
-# remote_state {
-#   backend = "s3"
-#   generate = {
-#     path      = "_backend.tf"
-#     if_exists = "overwrite_terragrunt"
-#   }
-#   config = {
-#     bucket         = "music-video-studio-tfstate"
-#     key            = "${path_relative_to_include()}/terraform.tfstate"
-#     region         = local.region
-#     encrypt        = true
-#     dynamodb_table = "music-video-studio-tflock"
-#   }
-# }
 
 inputs = {
   project = local.project

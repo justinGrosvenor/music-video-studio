@@ -4,7 +4,8 @@ import rateLimit from "@fastify/rate-limit";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import { z } from "zod";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { existsSync } from "node:fs";
 import { config } from "./config.js";
 import {
   saveUpload,
@@ -27,7 +28,8 @@ import {
   listAvatars,
   RunwayRateLimitError,
 } from "./runway.js";
-import { renderTimeline, writeRenderManifest, renderExists } from "./render.js";
+import { renderExists } from "./render.js";
+import { submitRender, getRenderJob } from "./render_queue.js";
 import { FfmpegError } from "./ffmpeg.js";
 import { extractLastFrame } from "./frames.js";
 import { sliceAudio } from "./audio_slice.js";
@@ -54,7 +56,14 @@ const app = Fastify({
   bodyLimit: 50 * 1024 * 1024,
 });
 
-await app.register(cors, { origin: config.WEB_ORIGIN, credentials: true });
+// WEB_ORIGIN may be a single URL or a comma-separated list. The list form is
+// useful when the same task definition is fronted by both an ALB and a
+// CloudFront distribution and the SPA can be loaded from either.
+const webOrigins = config.WEB_ORIGIN.split(",").map((s) => s.trim()).filter(Boolean);
+await app.register(cors, {
+  origin: webOrigins.length === 1 ? webOrigins[0] : webOrigins,
+  credentials: true,
+});
 await app.register(rateLimit, { max: 200, timeWindow: "1 minute" });
 await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } });
 await app.register(fastifyStatic, {
@@ -62,6 +71,31 @@ await app.register(fastifyStatic, {
   prefix: "/storage/",
   decorateReply: false,
 });
+
+// In production, the same container also serves the built SPA at `/`. The
+// Dockerfile copies apps/web/dist into /app/web. If WEB_DIST_DIR isn't set or
+// the directory doesn't exist (local dev), the registration is skipped — Vite
+// is the dev server and proxies /api here.
+const webDistDir = config.WEB_DIST_DIR;
+const webDistResolved = webDistDir ? resolve(webDistDir) : null;
+const serveSpa = !!(webDistResolved && existsSync(webDistResolved));
+if (serveSpa) {
+  await app.register(fastifyStatic, {
+    root: webDistResolved!,
+    prefix: "/",
+    decorateReply: true,
+    wildcard: false,
+  });
+  // SPA history-mode fallback: anything that's not /api/* or /storage/* and
+  // wasn't matched by a static asset returns index.html so client-side routes
+  // (/library/clips/abc, etc.) work on hard refresh.
+  app.setNotFoundHandler((req, reply) => {
+    if (req.url.startsWith("/api/") || req.url.startsWith("/storage/")) {
+      return reply.code(404).send({ error: "not found" });
+    }
+    return reply.sendFile("index.html");
+  });
+}
 
 app.setErrorHandler((err, req, reply) => {
   if (err instanceof z.ZodError) {
@@ -322,17 +356,31 @@ const RenderBody = z
     message: "clip extends past project duration",
   });
 
+// Submit a render job. Returns immediately with `renderId`; the actual
+// ffmpeg work runs in the in-process render queue (one render at a time on
+// this task to keep CPU contention predictable). The client polls
+// /api/render/jobs/:renderId for status + final URL.
 app.post("/api/render", { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } }, async (req, reply) => {
   const body = RenderBody.parse(req.body);
-  await writeRenderManifest(body.projectId, body);
-  const result = await renderTimeline(body);
-  return reply.send({ url: result.url });
+  const job = submitRender(body);
+  return reply.send({
+    renderId: job.id,
+    state: job.state,
+    queuePosition: job.queuePosition,
+  });
+});
+
+app.get("/api/render/jobs/:renderId", async (req, reply) => {
+  const params = z.object({ renderId: SafeId }).parse(req.params);
+  const job = getRenderJob(params.renderId);
+  if (!job) return reply.code(404).send({ error: "render job not found" });
+  return reply.send(job);
 });
 
 app.get("/api/render/:projectId", async (req, reply) => {
   const params = z.object({ projectId: SafeId }).parse(req.params);
   // Only the local backend knows about local files; S3 callers should track
-  // the URL returned from POST /api/render themselves.
+  // the URL returned from the render-job poll themselves.
   if (renderExists(params.projectId)) {
     return reply.send({
       url: `${config.PUBLIC_BASE_URL}/storage/renders/${params.projectId}.mp4`,

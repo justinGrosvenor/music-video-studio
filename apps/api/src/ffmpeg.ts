@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 
-const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+// 20 minutes — covers the full-timeline render queue worker for big projects
+// (15+ min songs, 30+ clips). The shorter ffmpeg jobs (frame extract, audio
+// slice) finish in seconds and never approach the cap.
+const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
 
 /**
  * Probe a video's container duration via ffprobe. Used by the renderer to

@@ -1,9 +1,8 @@
-import { writeFile, readFile, readdir, rm, copyFile } from "node:fs/promises";
+import { writeFile, readFile, readdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, basename, extname } from "node:path";
+import { join } from "node:path";
 import { config } from "./config.js";
 import { ensureDir } from "./storage.js";
-import { resolveLocalPath } from "./paths.js";
 import { rehostExternalUrl } from "./rehost.js";
 import type { SavedClip } from "@mvs/shared";
 
@@ -27,29 +26,13 @@ export async function saveClip(input: {
   const dir = clipDir(input.id);
   await ensureDir(dir);
 
-  let videoUrl = input.videoUrl;
-  const localPath = resolveLocalPath(input.videoUrl);
-  if (localPath && existsSync(localPath)) {
-    // Local /storage URL: copy the file in.
-    const filename = basename(localPath);
-    const dest = join(dir, filename);
-    if (!existsSync(dest)) await copyFile(localPath, dest);
-    videoUrl = `${config.PUBLIC_BASE_URL}/storage/clips/${input.id}/${filename}`;
-  } else if (/^https?:\/\//i.test(input.videoUrl)) {
-    // External (Runway) URL: download it so the entry doesn't rot when the
-    // remote signed link expires (~24–48h after generation).
-    // Use a unique filename so re-generations don't collide with browser cache.
-    const ext = extname(input.videoUrl.split("?")[0] || "") || ".mp4";
-    const tag = Date.now().toString(36);
-    videoUrl = await rehostExternalUrl({
-      url: input.videoUrl,
-      destDir: dir,
-      publicPathPrefix: `clips/${input.id}`,
-      publicBaseUrl: config.PUBLIC_BASE_URL,
-      filename: `clip-${tag}${ext}`,
-      defaultExt: ".mp4",
-    });
-  }
+  // rehostExternalUrl is the single source of truth for "make this URL
+  // durable on our storage backend": owned URLs (already on /storage or
+  // our S3 bucket) pass through; external URLs (Runway etc.) get downloaded
+  // and re-uploaded via storage.saveUpload, so the result is always on the
+  // configured backend (S3 in prod, local disk in dev). The metadata json
+  // we write below stays in this per-id directory either way.
+  const videoUrl = await rehostExternalUrl(input.videoUrl, ".mp4");
 
   const saved: SavedClip = {
     id: input.id,

@@ -1,9 +1,8 @@
-import { writeFile, readFile, readdir, rm, copyFile } from "node:fs/promises";
+import { writeFile, readFile, readdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, basename, extname } from "node:path";
+import { join } from "node:path";
 import { config } from "./config.js";
 import { ensureDir } from "./storage.js";
-import { resolveLocalPath } from "./paths.js";
 import { rehostExternalUrl } from "./rehost.js";
 import type { SavedImage } from "@mvs/shared";
 
@@ -15,10 +14,11 @@ function imageDir(id: string) {
 }
 
 /**
- * Persist a SavedImage entry. If the URL points at our own /storage tree,
- * copy the file into the per-id image directory so it survives even if the
- * original upload is removed. External URLs (Runway, etc.) are stored by
- * reference — they may expire 24–48h after creation.
+ * Persist a SavedImage entry. The asset URL is normalized through
+ * rehostExternalUrl: owned URLs (already on /storage or our S3 bucket)
+ * pass through unchanged; external URLs (Runway etc.) get downloaded and
+ * re-uploaded via the storage backend so the entry survives the remote
+ * signed link's ~24–48h expiry. The metadata json lives in this per-id dir.
  */
 export async function saveImage(input: {
   id: string;
@@ -31,26 +31,7 @@ export async function saveImage(input: {
   const dir = imageDir(input.id);
   await ensureDir(dir);
 
-  let url = input.url;
-  const localPath = resolveLocalPath(input.url);
-  if (localPath && existsSync(localPath)) {
-    const filename = basename(localPath);
-    const dest = join(dir, filename);
-    if (!existsSync(dest)) await copyFile(localPath, dest);
-    url = `${config.PUBLIC_BASE_URL}/storage/images/${input.id}/${filename}`;
-  } else if (/^https?:\/\//i.test(input.url)) {
-    // External (Runway) URL: download so the library entry survives the
-    // remote signed link's ~24–48h expiry.
-    const ext = extname(input.url.split("?")[0] || "") || ".png";
-    url = await rehostExternalUrl({
-      url: input.url,
-      destDir: dir,
-      publicPathPrefix: `images/${input.id}`,
-      publicBaseUrl: config.PUBLIC_BASE_URL,
-      filename: `image${ext}`,
-      defaultExt: ".png",
-    });
-  }
+  const url = await rehostExternalUrl(input.url, ".png");
 
   const saved: SavedImage = {
     id: input.id,

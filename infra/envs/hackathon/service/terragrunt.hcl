@@ -21,23 +21,23 @@ dependency "networking" {
 dependency "ecr" {
   config_path = "../ecr"
   mock_outputs = {
-    repository_url = "000000000000.dkr.ecr.us-east-1.amazonaws.com/music-video-studio-api"
+    repository_url = "000000000000.dkr.ecr.us-west-2.amazonaws.com/music-video-studio-api"
   }
 }
 
 dependency "alb" {
   config_path = "../alb"
   mock_outputs = {
-    target_group_arn = "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/mock/mock"
+    target_group_arn = "arn:aws:elasticloadbalancing:us-west-2:000000000000:targetgroup/mock/mock"
     alb_sg_id        = "sg-mock"
-    alb_dns_name     = "mock.us-east-1.elb.amazonaws.com"
+    alb_dns_name     = "mock.us-west-2.elb.amazonaws.com"
   }
 }
 
 dependency "cluster" {
   config_path = "../cluster"
   mock_outputs = {
-    cluster_id   = "arn:aws:ecs:us-east-1:000000000000:cluster/mock"
+    cluster_id   = "arn:aws:ecs:us-west-2:000000000000:cluster/mock"
     cluster_name = "mock"
   }
 }
@@ -47,7 +47,20 @@ dependency "storage" {
   mock_outputs = {
     bucket_name     = "mock-bucket"
     bucket_arn      = "arn:aws:s3:::mock-bucket"
-    public_url_base = "https://mock-bucket.s3.us-east-1.amazonaws.com"
+    public_url_base = "https://mock-bucket.s3.us-west-2.amazonaws.com"
+  }
+}
+
+# Soft dependency on cloudfront — when the stack hasn't been applied yet
+# (or doesn't exist), mocks resolve to an empty domain and the api uses
+# ALB-only CORS. Once cloudfront is up, re-apply this stack to inject the
+# distribution domain into WEB_ORIGIN.
+dependency "cloudfront" {
+  config_path                             = "../cloudfront"
+  skip_outputs                            = false
+  mock_outputs_allowed_terraform_commands = ["plan", "validate", "apply", "destroy"]
+  mock_outputs = {
+    domain_name = ""
   }
 }
 
@@ -66,4 +79,5 @@ inputs = {
   s3_bucket_name    = dependency.storage.outputs.bucket_name
   s3_bucket_arn     = dependency.storage.outputs.bucket_arn
   s3_public_url     = dependency.storage.outputs.public_url_base
+  cloudfront_domain = dependency.cloudfront.outputs.domain_name
 }

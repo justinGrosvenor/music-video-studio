@@ -1,49 +1,54 @@
-import { writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { join, extname } from "node:path";
+import { extname } from "node:path";
+import { config } from "./config.js";
+import { storage } from "./storage.js";
 
 /**
- * Download a remote (typically Runway) URL into a local destination directory
- * and return a public-facing path under the configured PUBLIC_BASE_URL.
+ * Make `url` durable. Two cases:
  *
- * Why: Runway-hosted output URLs (image / video / audio) expire 24–48h after
- * creation. If we save those raw URLs into the clip / image / project library,
- * the saved entries silently rot. Rehosting at save-time guarantees durability.
+ *   - Already-owned storage URLs (Fastify's `/storage/*` or our S3 bucket)
+ *     pass through unchanged — they're already durable on the backend that
+ *     issued them.
+ *   - External URLs (typically Runway-hosted outputs that expire ~24–48h
+ *     after generation) get fetched and re-uploaded via the configured
+ *     storage backend, returning the new content-addressed URL.
  *
- * Returns the original URL on any failure — caller should still record the
- * entry, just with the warning that it may expire.
+ * On any fetch / write failure the original URL is returned unchanged so the
+ * caller can still record the entry, with a console warning. The caller is
+ * responsible for surfacing that the link may rot.
  */
-export async function rehostExternalUrl(opts: {
-  url: string;
-  destDir: string;
-  /** Path segment after `${PUBLIC_BASE_URL}/storage/` for the rehosted URL. */
-  publicPathPrefix: string;
-  publicBaseUrl: string;
-  /** Filename to write inside destDir; auto-derived from the URL if omitted. */
-  filename?: string;
-  /** Default extension if URL lacks one (e.g. signed Runway URLs without ext). */
-  defaultExt?: string;
-}): Promise<string> {
-  const { url, destDir, publicPathPrefix, publicBaseUrl, defaultExt = ".bin" } = opts;
+export async function rehostExternalUrl(
+  url: string,
+  defaultExt = ".bin",
+): Promise<string> {
   if (!/^https?:\/\//i.test(url)) return url;
-
-  const urlPath = url.split("?")[0] || "";
-  const inferredExt = extname(urlPath) || defaultExt;
-  const filename = opts.filename ?? `asset${inferredExt}`;
-  const dest = join(destDir, filename);
-
-  if (existsSync(dest)) {
-    return `${publicBaseUrl}/storage/${publicPathPrefix}/${filename}`;
-  }
+  if (isOwnedStorageUrl(url)) return url;
 
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`fetch ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
-    await writeFile(dest, buf);
-    return `${publicBaseUrl}/storage/${publicPathPrefix}/${filename}`;
+    const inferredExt = extname(url.split("?")[0] || "") || defaultExt;
+    const filename = `rehosted${inferredExt}`;
+    const { publicUrl } = await storage.saveUpload(buf, filename);
+    return publicUrl;
   } catch (err) {
     console.warn(`rehost failed for ${url}; keeping external URL`, err);
     return url;
   }
+}
+
+/** Does `url` already point at one of our storage backends? */
+function isOwnedStorageUrl(url: string): boolean {
+  // Local backend: Fastify-served /storage/*
+  if (url.startsWith(`${config.PUBLIC_BASE_URL}/storage/`)) return true;
+  // S3 backend (default URL form: https://<bucket>.s3.<region>.amazonaws.com/...)
+  if (config.S3_BUCKET && config.S3_REGION) {
+    const s3Default = `https://${config.S3_BUCKET}.s3.${config.S3_REGION}.amazonaws.com/`;
+    if (url.startsWith(s3Default)) return true;
+  }
+  // S3 backend with custom public URL base (e.g. CloudFront in front of S3)
+  if (config.S3_PUBLIC_URL_BASE && url.startsWith(config.S3_PUBLIC_URL_BASE)) {
+    return true;
+  }
+  return false;
 }

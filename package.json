@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm -r --parallel dev",
+    "dev": "pnpm --filter @mvs/shared build && pnpm -r --parallel '/^dev:(api|web|shared)$/'",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "dev:web": "pnpm --filter @mvs/web dev",
     "dev:api": "pnpm --filter @mvs/api dev",
+    "dev:shared": "pnpm --filter @mvs/shared exec tsc -p tsconfig.build.json --watch --preserveWatchOutput",
     "dev:analyzer": "cd modal && .venv/bin/python local_server.py"
   },
   "devDependencies": {

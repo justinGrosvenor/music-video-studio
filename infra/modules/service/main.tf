@@ -14,6 +14,12 @@ variable "cluster_id" { type = string }
 variable "s3_bucket_name" { type = string }
 variable "s3_bucket_arn" { type = string }
 variable "s3_public_url" { type = string }
+# The CloudFront distribution that fronts the ALB. Empty until the cloudfront
+# stack has been applied; the api falls back to ALB-only CORS in that case.
+variable "cloudfront_domain" {
+  type    = string
+  default = ""
+}
 
 # Secrets/keys are read from SSM Parameter Store. Create these out-of-band:
 #   aws ssm put-parameter --name /music-video-studio/hackathon/RUNWAYML_API_SECRET --value '...' --type SecureString
@@ -121,8 +127,12 @@ resource "aws_security_group" "task" {
 
 resource "aws_ecs_task_definition" "api" {
   family                   = local.family
-  cpu                      = "1024"
-  memory                   = "2048"
+  # 2 vCPU / 4 GB. libx264 scales linearly to 2 threads so render wall-clock
+  # roughly halves vs. 1 vCPU, with comfortable memory headroom for the
+  # decoder buffers a 20+ clip timeline keeps in flight. Cost delta is ~$0.05/hr
+  # ($0.05 → $0.10) which is a fine trade for hackathon-shaped workloads.
+  cpu                      = "2048"
+  memory                   = "4096"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   execution_role_arn       = aws_iam_role.task_execution.arn
@@ -138,8 +148,20 @@ resource "aws_ecs_task_definition" "api" {
       ]
       environment = [
         { name = "PORT", value = tostring(var.api_port) },
+        # PUBLIC_BASE_URL stays on the ALB so backend-to-backend fetches
+        # (Modal/Runway pulling from /storage) bypass CloudFront's basic auth.
         { name = "PUBLIC_BASE_URL", value = "http://${var.alb_dns_name}" },
-        { name = "WEB_ORIGIN", value = "http://${var.alb_dns_name}" },
+        # WEB_ORIGIN accepts a comma-separated list. We always allow the ALB
+        # origin (lets you smoke-test via the ALB DNS) and append the
+        # CloudFront domain when it's known.
+        {
+          name  = "WEB_ORIGIN"
+          value = var.cloudfront_domain == "" ? (
+            "http://${var.alb_dns_name}"
+            ) : (
+            "http://${var.alb_dns_name},https://${var.cloudfront_domain}"
+          )
+        },
         { name = "STORAGE_DIR", value = "/app/storage" },
         { name = "STORAGE_BACKEND", value = "s3" },
         { name = "S3_BUCKET", value = var.s3_bucket_name },

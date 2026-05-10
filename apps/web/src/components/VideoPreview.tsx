@@ -34,12 +34,18 @@ export function VideoPreview() {
 
   const slotKey = (clip: { id: string; videoUrl: string }) => `${clip.id}\0${clip.videoUrl}`;
 
-  const loadInto = useCallback((slot: "a" | "b", clip: { id: string; videoUrl: string }) => {
+  const loadInto = useCallback((slot: "a" | "b", clip: { id: string; videoUrl: string; start: number; end: number }) => {
     const key = slotKey(clip);
     if (loadedRef.current[slot] === key) return;
     const el = slotEl(slot);
     if (!el) return;
     loadedRef.current[slot] = key;
+    // Attach listeners BEFORE setting src — if the metadata is in the browser
+    // cache (very common when remounting a clip we already played), the
+    // `loadedmetadata` event can fire synchronously inside `load()` and we'd
+    // miss it if we attached after.
+    const slotDur = clip.end - clip.start;
+    el.addEventListener("loadedmetadata", () => applyPlaybackRate(el, slotDur), { once: true });
     el.src = clip.videoUrl;
     el.load();
   }, [slotEl]);
@@ -50,25 +56,26 @@ export function VideoPreview() {
     const back: "a" | "b" = frontSlot === "a" ? "b" : "a";
 
     const activeKey = slotKey(active);
+    const slotDur = active.end - active.start;
     if (loadedRef.current[frontSlot] === activeKey) {
-      // Already loaded on front — but may be ended from a previous play.
+      // Already loaded on front — but may be ended from a previous play, and
+      // the rate may have been set when the slot duration was different
+      // (e.g. user dragged a boundary). Re-apply + repaint.
       const front = slotEl(frontSlot);
       if (front) {
+        applyPlaybackRate(front, slotDur);
         seekTo(front, active, playhead);
-        if (isPlaying) front.play().catch(() => {});
+        repaintIfStale(front, isPlaying);
       }
     } else if (loadedRef.current[back] === activeKey) {
       // The back slot is preloaded with the new active clip — promote it.
       const oldFront = slotEl(frontSlot);
       const newFront = slotEl(back);
       oldFront?.pause();
-      // Reset the new-front to the right time before it becomes visible. The
-      // stored element may be parked at its previous `ended` frame (often a
-      // black fade-out for Gen-4/Seedance), which would otherwise flash on
-      // re-show.
       if (newFront) {
+        applyPlaybackRate(newFront, slotDur);
         seekTo(newFront, active, playhead);
-        if (isPlaying) newFront.play().catch(() => {});
+        repaintIfStale(newFront, isPlaying);
       }
       setFrontSlot(back);
     } else {
@@ -84,16 +91,23 @@ export function VideoPreview() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, next, frontSlot, slotEl, loadInto, isPlaying]);
 
-  // Sync video to playhead only when scrubbing (paused). During playback the
-  // video runs on its own clock — constant seeking causes jitter.
+  // Sync the front video to the playhead on every change. During natural
+  // playback the playbackRate adjustment keeps the video tracking the slot,
+  // so `seekTo`'s drift threshold (~0.15s) means we no-op on every tick.
+  // When the user clicks the timeline (or the playhead jumps from any other
+  // source), drift exceeds the threshold and we seek. Repaint nudge only
+  // when paused; during play the act of seeking already triggers a frame.
   useEffect(() => {
-    if (!active || isPlaying) return;
+    if (!active) return;
     const front = slotEl(frontSlot);
     if (!front) return;
-    if (front.readyState >= 1) {
+    const doSeek = () => {
       seekTo(front, active, playhead);
+      if (!isPlaying) repaintIfStale(front, false);
+    };
+    if (front.readyState >= 1) {
+      doSeek();
     } else {
-      const doSeek = () => seekTo(front, active, playhead);
       front.addEventListener("loadedmetadata", doSeek, { once: true });
     }
   }, [playhead, active, frontSlot, slotEl, isPlaying]);
@@ -122,27 +136,33 @@ export function VideoPreview() {
     }
   }, []);
 
-  if (!active) {
-    return (
-      <div className="preview-empty">
-        <div className="label-big">preview</div>
-        <div>no clip at playhead</div>
-      </div>
-    );
-  }
-
+  // Slot visibility — opacity (not visibility/display) so the back element
+  // keeps decoding. When `active` is null we hide BOTH so the (possibly
+  // black fade-out) last frame doesn't show under the empty overlay.
   const slotStyle = (slot: "a" | "b"): React.CSSProperties => ({
     width: "100%",
     height: "100%",
     position: "absolute",
     inset: 0,
-    visibility: frontSlot === slot ? "visible" : "hidden",
+    opacity: active && frontSlot === slot ? 1 : 0,
+    pointerEvents: active && frontSlot === slot ? "auto" : "none",
   });
 
+  // Important: the video elements stay mounted regardless of `active`. If we
+  // unmounted them on `active === null`, scrubbing back would create new
+  // <video> elements while loadedRef still claimed the old clip was loaded
+  // — the "already on front" branch would no-op against an empty element
+  // and the user would see black until something else triggered a cold load.
   return (
     <div ref={containerRef} className="preview-container">
       <video ref={aRef} muted playsInline style={slotStyle("a")} />
       <video ref={bRef} muted playsInline style={slotStyle("b")} />
+      {!active && (
+        <div className="preview-empty preview-empty-overlay">
+          <div className="label-big">preview</div>
+          <div>no clip at playhead</div>
+        </div>
+      )}
       <button
         type="button"
         className="preview-fullscreen"
@@ -166,5 +186,51 @@ function seekTo(el: HTMLVideoElement, clip: { start: number; end: number }, play
   const target = Math.min(frac * vidDur, vidDur - 0.01);
   if (Math.abs(el.currentTime - target) > 0.15) {
     el.currentTime = target;
+  }
+}
+
+/**
+ * Make sure the seeked frame actually paints. Setting `currentTime` on a
+ * paused video doesn't always force a repaint — particularly when the
+ * element was previously in `ended` state, which is exactly the case after
+ * a clip plays through and the user scrubs back into it. A brief
+ * play()→pause() roundtrip wakes the decoder and the seeked frame lands.
+ *
+ * If we're meant to be playing, we just call play(). If the element isn't
+ * stale (not ended, has frames), we no-op to avoid a flash on every scrub.
+ */
+function repaintIfStale(el: HTMLVideoElement, isPlaying: boolean): void {
+  if (isPlaying) {
+    el.play().catch(() => {});
+    return;
+  }
+  // readyState < HAVE_CURRENT_DATA (2) means no decoded frame is available
+  // for the current position; ended means we just played past the end. In
+  // either case a play+pause forces a fresh decode at the seeked time.
+  if (el.ended || el.readyState < 2) {
+    el.play().then(() => el.pause()).catch(() => {});
+  }
+}
+
+/**
+ * Time-stretch a video element so its intrinsic duration spans the timeline
+ * slot. Mirrors the setpts=(PTS-STARTPTS)*K stretch the renderer applies, so
+ * preview ↔ exported MP4 stay in sync.
+ *
+ *   K = vidDur / slotDur
+ *
+ *   - K < 1 (source longer than slot): video plays slower so it fills the slot.
+ *   - K > 1 (source shorter than slot): video plays faster so it fits the slot.
+ *
+ * Clamped to [0.25, 4] so a degenerate slotDur (e.g. mid-drag transient zero)
+ * can't break the element. We're muted so audio artifacts of off-rate
+ * playback are irrelevant.
+ */
+function applyPlaybackRate(el: HTMLVideoElement, slotDur: number): void {
+  const vidDur = el.duration;
+  if (!Number.isFinite(vidDur) || vidDur <= 0 || slotDur <= 0) return;
+  const rate = Math.max(0.25, Math.min(4, vidDur / slotDur));
+  if (Math.abs(el.playbackRate - rate) > 0.01) {
+    el.playbackRate = rate;
   }
 }

@@ -175,12 +175,58 @@ export type RenderRequest = {
   fades?: boolean;
 };
 
-export async function renderTimeline(req: RenderRequest): Promise<{ url: string }> {
+export type RenderJobState = "queued" | "running" | "succeeded" | "failed";
+
+export interface RenderJob {
+  id: string;
+  state: RenderJobState;
+  enqueuedAt: number;
+  startedAt: number | null;
+  completedAt: number | null;
+  url: string | null;
+  error: string | null;
+  queuePosition: number | null;
+}
+
+export interface RenderSubmitResponse {
+  renderId: string;
+  state: RenderJobState;
+  queuePosition: number | null;
+}
+
+/** Submit a render job. Returns the renderId — actual work happens
+ *  asynchronously on the server; poll `getRenderJob(renderId)` for status. */
+export async function submitRender(req: RenderRequest): Promise<RenderSubmitResponse> {
   return jsonOrThrow(await fetch("/api/render", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(req),
   }));
+}
+
+export async function getRenderJob(renderId: string): Promise<RenderJob> {
+  return jsonOrThrow(await fetch(`/api/render/jobs/${renderId}`));
+}
+
+/** Convenience: submit a render and poll until it succeeds, fails, or hits
+ *  the timeout. The caller can also use submitRender + getRenderJob directly
+ *  if it wants to drive its own polling cadence (e.g. progress bar). */
+export async function renderTimeline(
+  req: RenderRequest,
+  opts: { intervalMs?: number; timeoutMs?: number; onUpdate?: (j: RenderJob) => void } = {},
+): Promise<{ url: string }> {
+  const intervalMs = opts.intervalMs ?? 2000;
+  const timeoutMs = opts.timeoutMs ?? 30 * 60 * 1000;
+  const { renderId } = await submitRender(req);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const job = await getRenderJob(renderId);
+    opts.onUpdate?.(job);
+    if (job.state === "succeeded" && job.url) return { url: job.url };
+    if (job.state === "failed") throw new Error(job.error ?? "render failed");
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  throw new Error("render timed out");
 }
 
 // Projects / Library -------------------------------------------------------

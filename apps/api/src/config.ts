@@ -15,7 +15,19 @@ const Env = z.object({
   MODAL_AUDIO_URL: optionalUrl.optional(),
   PORT: z.coerce.number().default(3001),
   PUBLIC_BASE_URL: z.string().url().default("http://localhost:3001"),
-  WEB_ORIGIN: z.string().url().default("http://localhost:5173"),
+  // Comma-separated list of allowed CORS origins (or a single URL).
+  WEB_ORIGIN: z
+    .string()
+    .default("http://localhost:5173")
+    .refine(
+      (v) =>
+        v
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .every((s) => /^https?:\/\/[^,\s]+$/.test(s)),
+      "WEB_ORIGIN must be a URL or comma-separated list of URLs"
+    ),
   STORAGE_DIR: z.string().default("./storage"),
   STORAGE_BACKEND: z.enum(["local", "s3"]).default("local"),
   S3_BUCKET: optionalNonEmpty.optional(),
@@ -23,6 +35,10 @@ const Env = z.object({
   /** Override the public URL base for S3 objects (e.g. a CloudFront domain).
    * When unset, virtual-hosted-style S3 URLs are used. */
   S3_PUBLIC_URL_BASE: optionalUrl.optional(),
+  /** Directory holding the built SPA (apps/web/dist) to serve from `/`.
+   *  In the production Docker image this is set to /app/web; locally it can
+   *  stay unset and Vite handles the SPA in dev. */
+  WEB_DIST_DIR: optionalNonEmpty.optional(),
 });
 
 const parsed = Env.safeParse(process.env);
