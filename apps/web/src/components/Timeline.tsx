@@ -317,7 +317,17 @@ export function Timeline() {
                       }}
                       aria-label={`${c.status} clip ${c.id}`}
                     >
-                      <ClipLabel status={c.status} source={c.source} />
+                      {c.status === "ready" && c.videoUrl && (
+                        <video
+                          className="clip-thumb"
+                          src={c.videoUrl}
+                          muted
+                          preload="metadata"
+                        />
+                      )}
+                      <span className="clip-label">
+                        <ClipLabel status={c.status} source={c.source} />
+                      </span>
                     </button>
                   </div>
                 );

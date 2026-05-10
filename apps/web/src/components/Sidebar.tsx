@@ -147,11 +147,9 @@ export function Sidebar() {
 
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+      <div className="sidebar-header-row">
         <span className="pill">{sectionLabel}</span>
-      </div>
-      <div className="meta">
-        {durationSec.toFixed(1)}s · {clip.id}
+        <span className="meta">{durationSec.toFixed(1)}s · {clip.id}</span>
       </div>
 
       <SourcePicker
