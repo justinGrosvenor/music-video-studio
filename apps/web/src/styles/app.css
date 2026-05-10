@@ -358,6 +358,21 @@ input, textarea { font: inherit; color: inherit; }
 }
 .lookbook .tile.filled:hover .tile-remove { display: flex; align-items: center; justify-content: center; }
 .lookbook .tile-remove:hover { background: rgba(239, 79, 94, 0.85); }
+.lookbook .tile-download {
+  position: absolute;
+  top: 4px; left: 4px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  border: 0;
+  font-size: 11px; line-height: 1;
+  cursor: pointer;
+  display: none;
+  padding: 0;
+}
+.lookbook .tile.filled:hover .tile-download { display: flex; align-items: center; justify-content: center; }
+.lookbook .tile-download:hover { background: var(--accent); }
 
 /* Main / preview */
 .main {

@@ -32,6 +32,7 @@ import { sliceAudio } from "./audio_slice.js";
 import { ensureVocalStem } from "./vocal.js";
 import { saveProject, listProjects, loadProject, deleteProject, listRenders } from "./projects.js";
 import { saveClip, listClips, deleteClip } from "./clips.js";
+import { saveImage, listImages, deleteImage } from "./images.js";
 import {
   ImageToVideoRequest,
   VideoToVideoRequest,
@@ -375,6 +376,36 @@ app.post("/api/clips/save", async (req, reply) => {
 app.delete("/api/clips/:id", async (req, reply) => {
   const params = z.object({ id: z.string() }).parse(req.params);
   const deleted = await deleteClip(params.id);
+  if (!deleted) return reply.code(404).send({ error: "not found" });
+  return reply.send({ ok: true });
+});
+
+// Image Library --------------------------------------------------------
+// Namespaced under /api/library to avoid clashing with /api/images/upload.
+
+const SaveImageBody = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(200),
+  url: z.string().url(),
+  source: z.string(),
+  prompt: z.string().nullable(),
+  model: z.string().nullable(),
+});
+
+app.get("/api/library/images", async (_req, reply) => {
+  const images = await listImages();
+  return reply.send({ images });
+});
+
+app.post("/api/library/images/save", async (req, reply) => {
+  const body = SaveImageBody.parse(req.body);
+  const saved = await saveImage(body);
+  return reply.send(saved);
+});
+
+app.delete("/api/library/images/:id", async (req, reply) => {
+  const params = z.object({ id: z.string() }).parse(req.params);
+  const deleted = await deleteImage(params.id);
   if (!deleted) return reply.code(404).send({ error: "not found" });
   return reply.send({ ok: true });
 });

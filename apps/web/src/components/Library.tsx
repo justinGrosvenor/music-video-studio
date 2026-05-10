@@ -9,28 +9,34 @@ import {
   listRenders,
   listSavedClips,
   deleteClipOnServer,
+  listSavedImages,
+  deleteImageFromLibrary,
   type ProjectMeta,
   type RenderEntry,
   type SavedClip,
+  type SavedImage,
 } from "../lib/api.js";
+import { downloadFromUrl } from "../lib/download.js";
 
-type Tab = "projects" | "clips" | "renders";
+type Tab = "projects" | "clips" | "images" | "renders";
 
 export function Library({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<Tab>("projects");
   const [projects, setProjects] = useState<ProjectMeta[] | null>(null);
   const [clips, setClips] = useState<SavedClip[] | null>(null);
+  const [images, setImages] = useState<SavedImage[] | null>(null);
   const [renders, setRenders] = useState<RenderEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
   const restoreSnapshot = useStore((s) => s.restoreSnapshot);
   const updateClip = useStore((s) => s.updateClip);
   const selectedClipId = useStore((s) => s.selectedClipId);
+  const addLookbook = useStore((s) => s.addLookbook);
 
   const refresh = useCallback(() => {
     setLoading(true);
-    Promise.all([listProjects(), listSavedClips(), listRenders()])
-      .then(([p, c, r]) => { setProjects(p); setClips(c); setRenders(r); })
-      .catch(() => { setProjects([]); setClips([]); setRenders([]); })
+    Promise.all([listProjects(), listSavedClips(), listSavedImages(), listRenders()])
+      .then(([p, c, i, r]) => { setProjects(p); setClips(c); setImages(i); setRenders(r); })
+      .catch(() => { setProjects([]); setClips([]); setImages([]); setRenders([]); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -93,6 +99,23 @@ export function Library({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const onUseImage = (image: SavedImage) => {
+    addLookbook(image.url);
+    onClose();
+    toast.success(`Added "${image.name || "image"}" to lookbook`);
+  };
+
+  const onDeleteImage = async (id: string, name: string) => {
+    if (!confirm(`Delete "${name || "image"}"? This won't affect lookbook tiles already using it.`)) return;
+    try {
+      await deleteImageFromLibrary(id);
+      setImages((prev) => prev?.filter((i) => i.id !== id) ?? []);
+      toast.success("Image deleted");
+    } catch (err) {
+      toast.error(`Failed to delete: ${getErrorMessage(err)}`);
+    }
+  };
+
   return (
     <div className="library-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="library-modal">
@@ -111,6 +134,13 @@ export function Library({ onClose }: { onClose: () => void }) {
               onClick={() => setTab("clips")}
             >
               Clips
+            </button>
+            <button
+              type="button"
+              className={`library-tab${tab === "images" ? " active" : ""}`}
+              onClick={() => setTab("images")}
+            >
+              Images
             </button>
             <button
               type="button"
@@ -140,6 +170,12 @@ export function Library({ onClose }: { onClose: () => void }) {
               onUse={onUseClip}
               onDelete={onDeleteClip}
               hasSelection={!!selectedClipId}
+            />
+          ) : tab === "images" ? (
+            <ImagesTab
+              images={images ?? []}
+              onUse={onUseImage}
+              onDelete={onDeleteImage}
             />
           ) : (
             <RendersTab renders={renders ?? []} />
@@ -241,6 +277,73 @@ function ClipsTab({
   );
 }
 
+function ImagesTab({
+  images,
+  onUse,
+  onDelete,
+}: {
+  images: SavedImage[];
+  onUse: (image: SavedImage) => void;
+  onDelete: (id: string, name: string) => void;
+}) {
+  const [downloading, setDownloading] = useState<string | null>(null);
+
+  if (!images.length) {
+    return (
+      <div className="library-empty">
+        No saved images yet. Generated lookbook images get saved here automatically.
+      </div>
+    );
+  }
+
+  const onDownload = async (img: SavedImage) => {
+    setDownloading(img.id);
+    const fallback = img.url.split("/").pop()?.split("?")[0] || "image.png";
+    const filename = img.name ? `${img.name.slice(0, 40).replace(/[^a-zA-Z0-9._-]/g, "_")}.png` : fallback;
+    try {
+      await downloadFromUrl(img.url, filename);
+    } finally {
+      setDownloading(null);
+    }
+  };
+
+  return (
+    <div className="library-grid">
+      {images.map((img) => (
+        <div key={img.id} className="library-card">
+          <div
+            className="library-card-thumb"
+            style={{ backgroundImage: `url(${img.url})` }}
+          />
+          <div className="library-card-info">
+            <div className="library-card-name">{img.name || "untitled"}</div>
+            <div className="library-card-date">
+              {img.source}{img.model ? ` · ${img.model}` : ""} ·{" "}
+              {new Date(img.savedAt).toLocaleDateString()}
+            </div>
+          </div>
+          <div className="library-card-actions">
+            <button type="button" className="btn" onClick={() => onUse(img)}>
+              Add to lookbook
+            </button>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => onDownload(img)}
+              disabled={downloading === img.id}
+            >
+              {downloading === img.id ? "…" : "Download"}
+            </button>
+            <button type="button" className="btn ghost" onClick={() => onDelete(img.id, img.name)}>
+              Delete
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function RendersTab({ renders }: { renders: RenderEntry[] }) {
   const [downloading, setDownloading] = useState<string | null>(null);
 
@@ -251,19 +354,7 @@ function RendersTab({ renders }: { renders: RenderEntry[] }) {
   const onDownload = async (r: RenderEntry) => {
     setDownloading(r.name);
     try {
-      const res = await fetch(r.url);
-      if (!res.ok) throw new Error(`fetch ${res.status}`);
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = r.name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(blobUrl);
-    } catch (err) {
-      toast.error(`Download failed: ${getErrorMessage(err)}`);
+      await downloadFromUrl(r.url, r.name);
     } finally {
       setDownloading(null);
     }

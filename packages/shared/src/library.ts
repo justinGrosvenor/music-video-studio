@@ -42,3 +42,17 @@ export const SavedClip = z.object({
   savedAt: z.string(),
 });
 export type SavedClip = z.infer<typeof SavedClip>;
+
+export const SavedImage = z.object({
+  id: z.string(),
+  name: z.string(),
+  url: z.string(),
+  /** Where the image came from: "uploaded" | "generated" | external label. */
+  source: z.string(),
+  /** Text-to-image prompt (only set for generated images). */
+  prompt: z.string().nullable(),
+  /** Runway model when source = "generated", else null. */
+  model: z.string().nullable(),
+  savedAt: z.string(),
+});
+export type SavedImage = z.infer<typeof SavedImage>;

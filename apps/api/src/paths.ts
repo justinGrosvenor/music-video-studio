@@ -1,4 +1,4 @@
-import { resolve, normalize, extname } from "node:path";
+import { resolve, relative, isAbsolute, sep, extname } from "node:path";
 import { config } from "./config.js";
 
 /**
@@ -11,7 +11,13 @@ export function resolveLocalPath(url: string): string | null {
   if (!url.startsWith(prefix)) return null;
   const root = resolve(process.cwd(), config.STORAGE_DIR);
   const filePath = resolve(root, url.slice(prefix.length));
-  if (!normalize(filePath).startsWith(root)) {
+  // Use `path.relative` rather than `startsWith` so siblings with a shared
+  // prefix (e.g. /app/storage-evil/...) don't masquerade as being inside
+  // /app/storage. Reject anything that climbs out via `..` (parent ref),
+  // is absolute (different drive on Windows, or a crafted path), or is
+  // empty (filePath exactly equal to root, with no actual file specified).
+  const rel = relative(root, filePath);
+  if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
     throw new Error("path escapes storage directory");
   }
   return filePath;

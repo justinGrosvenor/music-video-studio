@@ -1,9 +1,10 @@
-import { mkdir, writeFile, readFile, readdir, rm, copyFile } from "node:fs/promises";
+import { writeFile, readFile, readdir, rm, copyFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join, basename, extname } from "node:path";
 import { config } from "./config.js";
 import { ensureDir } from "./storage.js";
 import { resolveLocalPath } from "./paths.js";
+import { rehostExternalUrl } from "./rehost.js";
 import type { SavedClip } from "@mvs/shared";
 
 const CLIPS_DIR = join(config.STORAGE_DIR, "clips");
@@ -29,10 +30,23 @@ export async function saveClip(input: {
   let videoUrl = input.videoUrl;
   const localPath = resolveLocalPath(input.videoUrl);
   if (localPath && existsSync(localPath)) {
+    // Local /storage URL: copy the file in.
     const filename = basename(localPath);
     const dest = join(dir, filename);
     if (!existsSync(dest)) await copyFile(localPath, dest);
     videoUrl = `${config.PUBLIC_BASE_URL}/storage/clips/${input.id}/${filename}`;
+  } else if (/^https?:\/\//i.test(input.videoUrl)) {
+    // External (Runway) URL: download it so the entry doesn't rot when the
+    // remote signed link expires (~24–48h after generation).
+    const ext = extname(input.videoUrl.split("?")[0] || "") || ".mp4";
+    videoUrl = await rehostExternalUrl({
+      url: input.videoUrl,
+      destDir: dir,
+      publicPathPrefix: `clips/${input.id}`,
+      publicBaseUrl: config.PUBLIC_BASE_URL,
+      filename: `clip${ext}`,
+      defaultExt: ".mp4",
+    });
   }
 
   const saved: SavedClip = {

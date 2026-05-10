@@ -132,6 +132,10 @@ type State = {
   pickAvatar: (id: string, name: string, imageUri: string | null) => void;
   addLookbook: (url: string) => void;
   removeLookbook: (url: string) => void;
+  /** Swap a lookbook entry in place — used after the image library auto-save
+   *  rehosts a Runway URL into /storage so the lookbook stops pointing at the
+   *  expiring link. No-op if oldUrl isn't in the lookbook. */
+  replaceLookbookUrl: (oldUrl: string, newUrl: string) => void;
 
   setZoom: (z: number) => void;
   zoomIn: () => void;
@@ -284,6 +288,19 @@ export const useStore = create<State>()(
         set((s) => (s.lookbook.includes(url) ? s : { lookbook: [...s.lookbook, url] })),
       removeLookbook: (url) =>
         set((s) => ({ lookbook: s.lookbook.filter((u) => u !== url) })),
+      replaceLookbookUrl: (oldUrl, newUrl) =>
+        set((s) => {
+          const idx = s.lookbook.indexOf(oldUrl);
+          if (idx < 0 || oldUrl === newUrl) return s;
+          // If the new URL is already in the lookbook (race), just remove the
+          // old one rather than create a duplicate.
+          if (s.lookbook.includes(newUrl)) {
+            return { lookbook: s.lookbook.filter((u) => u !== oldUrl) };
+          }
+          const next = [...s.lookbook];
+          next[idx] = newUrl;
+          return { lookbook: next };
+        }),
 
       setZoom: (z) => set({ zoom: clamp(z, ZOOM_MIN, ZOOM_MAX) }),
       zoomIn: () => set((s) => ({ zoom: clamp(s.zoom * ZOOM_STEP, ZOOM_MIN, ZOOM_MAX) })),

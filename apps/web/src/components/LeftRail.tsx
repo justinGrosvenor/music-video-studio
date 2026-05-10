@@ -5,8 +5,10 @@ import {
   listAvatars,
   startTextToImage,
   pollTask,
+  saveImageToLibrary,
   type AvatarSummary,
 } from "../lib/api.js";
+import { downloadFromUrl } from "../lib/download.js";
 import { AssetUploader } from "./AssetUploader.js";
 import { toast } from "../lib/toast.js";
 import { getErrorMessage, type TextToImageModel, type TextToImageRatio } from "@mvs/shared";
@@ -50,6 +52,7 @@ export function LeftRail() {
   const lookbook = useStore((s) => s.lookbook);
   const addLookbook = useStore((s) => s.addLookbook);
   const removeLookbook = useStore((s) => s.removeLookbook);
+  const replaceLookbookUrl = useStore((s) => s.replaceLookbookUrl);
   const analysis = useStore((s) => s.analysis);
 
   const [lookbookStatus, setLookbookStatus] = useState<string | null>(null);
@@ -232,6 +235,18 @@ export function LeftRail() {
             <div key={url} className="tile filled" style={{ backgroundImage: `url(${url})` }}>
               <button
                 type="button"
+                className="tile-download"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void downloadFromUrl(url, url.split("/").pop()?.split("?")[0] || "image.png");
+                }}
+                title="download"
+                aria-label="download tile"
+              >
+                ↓
+              </button>
+              <button
+                type="button"
                 className="tile-remove"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -247,7 +262,27 @@ export function LeftRail() {
           {lookbook.length < LOOKBOOK_MAX && (
             <AssetUploader
               className="tile add"
-              onUploaded={addLookbook}
+              onUploaded={(url) => {
+                addLookbook(url);
+                // Save to the image library so uploads are browsable alongside
+                // generated images. The server rehosts external URLs into
+                // /storage/images; if the saved URL differs (rehost happened
+                // or path normalized), swap the lookbook entry to match so
+                // we don't keep pointing at the original.
+                const fname = url.split("/").pop()?.split("?")[0] || "image";
+                void saveImageToLibrary({
+                  id: `img-${crypto.randomUUID().slice(0, 8)}`,
+                  name: fname,
+                  url,
+                  source: "uploaded",
+                  prompt: null,
+                  model: null,
+                })
+                  .then((saved) => {
+                    if (saved.url !== url) replaceLookbookUrl(url, saved.url);
+                  })
+                  .catch((err) => console.warn("save uploaded image to library failed", err));
+              }}
               onStatus={setLookbookStatus}
             >
               <span className="tile-add-label">{lookbookStatus ?? "+"}</span>
@@ -275,6 +310,7 @@ export function LeftRail() {
               addLookbook(url);
               setShowGenerator(false);
             }}
+            onRehosted={replaceLookbookUrl}
           />
         )}
       </div>
@@ -299,9 +335,11 @@ export function LeftRail() {
 function ImageGenerator({
   lookbook,
   onDone,
+  onRehosted,
 }: {
   lookbook: string[];
   onDone: (url: string) => void;
+  onRehosted: (oldUrl: string, newUrl: string) => void;
 }) {
   const [model, setModel] = useState<TextToImageModel>("gen4_image");
   const [ratio, setRatio] = useState<TextToImageRatio>("1920:1080");
@@ -345,9 +383,27 @@ function ImageGenerator({
       if (task.status !== "SUCCEEDED" || !task.output?.[0]) {
         throw new Error(task.error ?? `task ${task.status.toLowerCase()}`);
       }
-      onDone(task.output[0]);
+      const imageUrl = task.output[0];
+      onDone(imageUrl);
       toast.success("Image added to lookbook");
       setPrompt("");
+
+      // Auto-save into the image library so it's reusable across projects
+      // and downloadable from there. The server rehosts external (Runway)
+      // URLs into /storage/images/<id>/; on success swap the lookbook entry
+      // to the durable URL so it doesn't rot when Runway expires the link.
+      void saveImageToLibrary({
+        id: `img-${crypto.randomUUID().slice(0, 8)}`,
+        name: prompt.trim().slice(0, 60),
+        url: imageUrl,
+        source: "generated",
+        prompt: prompt.trim(),
+        model,
+      })
+        .then((saved) => {
+          if (saved.url !== imageUrl) onRehosted(imageUrl, saved.url);
+        })
+        .catch((err) => console.warn("auto-save image to library failed", err));
     } catch (err) {
       const msg = getErrorMessage(err).slice(0, 140);
       setError(msg);

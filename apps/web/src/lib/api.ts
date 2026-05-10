@@ -10,9 +10,10 @@ import type {
   SavedProject,
   RenderEntry,
   SavedClip,
+  SavedImage,
   Task,
 } from "@mvs/shared";
-export type { AvatarSummary, ProjectMeta, SavedProject, RenderEntry, SavedClip };
+export type { AvatarSummary, ProjectMeta, SavedProject, RenderEntry, SavedClip, SavedImage };
 
 export class ApiError extends Error {
   status: number;
@@ -225,4 +226,23 @@ export async function saveClipToServer(clip: Omit<SavedClip, "savedAt">): Promis
 
 export async function deleteClipOnServer(id: string): Promise<void> {
   await jsonOrThrow(await fetch(`/api/clips/${id}`, { method: "DELETE" }));
+}
+
+// Image Library -----------------------------------------------------------
+
+export async function listSavedImages(): Promise<SavedImage[]> {
+  const res = await jsonOrThrow<{ images: SavedImage[] }>(await fetch("/api/library/images"));
+  return res.images;
+}
+
+export async function saveImageToLibrary(image: Omit<SavedImage, "savedAt">): Promise<SavedImage> {
+  return jsonOrThrow(await fetch("/api/library/images/save", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(image),
+  }));
+}
+
+export async function deleteImageFromLibrary(id: string): Promise<void> {
+  await jsonOrThrow(await fetch(`/api/library/images/${id}`, { method: "DELETE" }));
 }

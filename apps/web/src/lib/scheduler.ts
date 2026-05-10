@@ -397,7 +397,10 @@ async function run(jobId: string): Promise<void> {
 
       // Auto-save into the clip library. Uses the timeline clip's id as the
       // saved-clip id so re-generations overwrite the same entry instead of
-      // piling up duplicates. Failure is logged but doesn't block the user.
+      // piling up duplicates. The server rehosts external (Runway) URLs into
+      // /storage/clips/<id>/, so on success we replace the timeline clip's
+      // URL with the durable one — otherwise the saved project snapshot
+      // points at a Runway link that expires ~24–48h later.
       void saveClipToServer({
         id: job.clipId,
         name: job.input.prompt?.slice(0, 60) || `${job.input.sectionLabel} clip`,
@@ -406,7 +409,13 @@ async function run(jobId: string): Promise<void> {
         prompt: job.input.prompt || null,
         duration: job.input.duration,
         sectionLabel: job.input.sectionLabel,
-      }).catch((err) => console.warn("auto-save to clip library failed", err));
+      })
+        .then((saved) => {
+          if (saved.videoUrl && saved.videoUrl !== videoUrl) {
+            useStore.getState().updateClip(job.clipId, { videoUrl: saved.videoUrl });
+          }
+        })
+        .catch((err) => console.warn("auto-save to clip library failed", err));
     } else {
       const reason = final.error ?? `task ended in ${final.status} with no output`;
       setJobPatch(jobId, { state: "failed", error: reason, completedAt: Date.now() });
