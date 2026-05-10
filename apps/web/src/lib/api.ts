@@ -105,12 +105,43 @@ export async function listAvatars(): Promise<AvatarSummary[]> {
   return res.avatars;
 }
 
-export async function createAvatar(imageUrl: string, name: string): Promise<{ avatarId: string }> {
+export type AvatarStatus = "PROCESSING" | "READY" | "FAILED";
+
+export interface AvatarSubmitResult {
+  avatarId: string;
+  status: AvatarStatus;
+  failureReason?: string | null;
+}
+
+/** Kick off avatar creation. Returns immediately — Runway typically takes
+ *  30–90s to finish processing, so we poll on the client side via
+ *  `pollAvatar` instead of holding the HTTP request open. */
+export async function createAvatar(imageUrl: string, name: string): Promise<AvatarSubmitResult> {
   return jsonOrThrow(await fetch("/api/avatars/create", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ imageUrl, name }),
   }));
+}
+
+export async function getAvatar(id: string): Promise<AvatarSubmitResult> {
+  return jsonOrThrow(await fetch(`/api/avatars/${id}`));
+}
+
+/** Submit a create call and poll until READY / FAILED / timeout. */
+export async function pollAvatar(
+  avatarId: string,
+  opts: { intervalMs?: number; timeoutMs?: number } = {},
+): Promise<AvatarSubmitResult> {
+  const intervalMs = opts.intervalMs ?? 3000;
+  const timeoutMs = opts.timeoutMs ?? 5 * 60 * 1000;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const r = await getAvatar(avatarId);
+    if (r.status !== "PROCESSING") return r;
+    await new Promise((res) => setTimeout(res, intervalMs));
+  }
+  throw new Error("avatar polling timed out");
 }
 
 export async function startImageToVideo(req: ImageToVideoRequest): Promise<{ id: string }> {

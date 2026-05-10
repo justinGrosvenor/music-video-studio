@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useStore } from "../lib/store.js";
 import {
   createAvatar,
+  pollAvatar,
   listAvatars,
   saveImageToLibrary,
   type AvatarSummary,
@@ -56,22 +57,46 @@ export function LeftRail() {
     setMode("idle");
   }, [setCharacter]);
 
-  const onCreateAvatar = useCallback(() => {
+  const onCreateAvatar = useCallback(async () => {
     if (!character || !nameInput.trim()) return;
     const name = nameInput.trim();
     setAvatarStatus("creating");
     setAvatarName(name);
-    createAvatar(character, name)
-      .then(({ avatarId }) => {
-        setAvatarId(avatarId);
-        setNameInput("");
-        toast.success(`Avatar "${name}" created`);
-      })
-      .catch((err) => {
-        const msg = getErrorMessage(err).slice(0, 80);
-        setAvatarStatus("failed", msg);
-        toast.error(`Avatar creation failed: ${msg}`);
-      });
+    try {
+      // Two-step: submit returns immediately with PROCESSING; poll until
+      // READY. The server can't hold the HTTP connection open for the
+      // 30–90s Runway processing window — CloudFront's origin response
+      // timeout (60s default) would cut us off first.
+      const submitted = await createAvatar(character, name);
+      // Stash the avatar id right away so a refresh keeps the polling
+      // context. The status stays "creating" until READY/FAILED.
+      setAvatarId(submitted.avatarId);
+      setNameInput("");
+
+      if (submitted.status === "FAILED") {
+        const reason = submitted.failureReason ?? "unknown";
+        setAvatarStatus("failed", reason);
+        toast.error(`Avatar creation failed: ${reason.slice(0, 80)}`);
+        return;
+      }
+      if (submitted.status === "READY") {
+        toast.success(`Avatar "${name}" ready`);
+        return;
+      }
+      // PROCESSING — poll until terminal.
+      const final = await pollAvatar(submitted.avatarId);
+      if (final.status === "FAILED") {
+        const reason = final.failureReason ?? "unknown";
+        setAvatarStatus("failed", reason);
+        toast.error(`Avatar creation failed: ${reason.slice(0, 80)}`);
+        return;
+      }
+      toast.success(`Avatar "${name}" ready`);
+    } catch (err) {
+      const msg = getErrorMessage(err).slice(0, 80);
+      setAvatarStatus("failed", msg);
+      toast.error(`Avatar creation failed: ${msg}`);
+    }
   }, [character, nameInput, setAvatarStatus, setAvatarName, setAvatarId]);
 
   const onPickExisting = useCallback((a: AvatarSummary) => {

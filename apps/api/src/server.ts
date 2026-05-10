@@ -25,6 +25,7 @@ import {
   getTask,
   deleteTask,
   createAvatar,
+  getAvatar,
   listAvatars,
   RunwayRateLimitError,
 } from "./runway.js";
@@ -253,10 +254,21 @@ app.get("/api/avatars", async (_req, reply) => {
   return reply.send({ avatars });
 });
 
+// Submit an avatar to Runway and return immediately. The avatar usually
+// reports `PROCESSING` for 30–90s while Runway prepares it; if we held the
+// HTTP request open through that, CloudFront would 504 first (default
+// origin response timeout is 60s). The client polls /api/avatars/:id for
+// status until READY or FAILED.
 app.post("/api/avatars/create", async (req, reply) => {
   const body = CreateAvatarBody.parse(req.body);
-  const { avatarId } = await createAvatar(body.imageUrl, body.name);
-  return reply.send({ avatarId });
+  const result = await createAvatar(body.imageUrl, body.name);
+  return reply.send(result);
+});
+
+app.get("/api/avatars/:id", async (req, reply) => {
+  const params = z.object({ id: z.string() }).parse(req.params);
+  const result = await getAvatar(params.id);
+  return reply.send(result);
 });
 
 // Tasks ----------------------------------------------------------------

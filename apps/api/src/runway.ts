@@ -366,7 +366,17 @@ export async function listAvatars(): Promise<AvatarSummary[]> {
   return results;
 }
 
-export async function createAvatar(imageUrl: string, name: string): Promise<{ avatarId: string }> {
+export type AvatarSubmitResult = {
+  avatarId: string;
+  status: "PROCESSING" | "READY" | "FAILED";
+  failureReason?: string | null;
+};
+
+/** Submit an avatar to Runway and return immediately with whatever status it
+ *  reports. Runway typically takes 30–90s to finish PROCESSING; the caller
+ *  polls /api/avatars/:id rather than holding an HTTP connection open that
+ *  long (CloudFront's origin response timeout would cut us off first). */
+export async function createAvatar(imageUrl: string, name: string): Promise<AvatarSubmitResult> {
   const filePath = resolveLocalPath(imageUrl);
   let imageUri: string;
   if (filePath) {
@@ -385,23 +395,43 @@ export async function createAvatar(imageUrl: string, name: string): Promise<{ av
     imageProcessing: "optimize",
   });
 
-  if (avatar.status === "FAILED") {
-    throw new Error(`avatar creation failed: ${avatar.failureReason}`);
-  }
+  return {
+    avatarId: avatar.id,
+    status: avatar.status as AvatarSubmitResult["status"],
+    failureReason: "failureReason" in avatar ? (avatar.failureReason as string | null) : null,
+  };
+}
 
-  if (avatar.status === "PROCESSING") {
+/** Fetch the current status of an avatar. Used by the client to poll after
+ *  a create submission while Runway processes it. */
+export async function getAvatar(id: string): Promise<AvatarSubmitResult> {
+  const a = await runway.avatars.retrieve(id);
+  return {
+    avatarId: a.id,
+    status: a.status as AvatarSubmitResult["status"],
+    failureReason: "failureReason" in a ? (a.failureReason as string | null) : null,
+  };
+}
+
+// Legacy synchronous version retained in case the older code path is still
+// referenced — exported under a different name. Not called by /api routes.
+export async function createAvatarSync(imageUrl: string, name: string): Promise<{ avatarId: string }> {
+  const submitted = await createAvatar(imageUrl, name);
+  if (submitted.status === "FAILED") {
+    throw new Error(`avatar creation failed: ${submitted.failureReason ?? "unknown"}`);
+  }
+  if (submitted.status === "PROCESSING") {
     const polled = await pollUntil(
-      () => runway.avatars.retrieve(avatar.id),
+      () => getAvatar(submitted.avatarId),
       (a) => a.status === "READY" || a.status === "FAILED",
       { timeoutMs: 120_000, label: "avatar processing" }
     );
     if (polled.status === "FAILED") {
-      throw new Error(`avatar processing failed: ${polled.failureReason}`);
+      throw new Error(`avatar processing failed: ${polled.failureReason ?? "unknown"}`);
     }
-    return { avatarId: polled.id };
+    return { avatarId: polled.avatarId };
   }
-
-  return { avatarId: avatar.id };
+  return { avatarId: submitted.avatarId };
 }
 
 export async function lipSync(req: LipSyncRequest): Promise<RunwayTask> {
