@@ -14,7 +14,8 @@ export function VideoPreview() {
   const aRef = useRef<HTMLVideoElement>(null);
   const bRef = useRef<HTMLVideoElement>(null);
   const [frontSlot, setFrontSlot] = useState<"a" | "b">("a");
-  /** Clip ID currently loaded in each slot. Bookkeeping only — no render impact. */
+  /** Composite key (id + url) loaded in each slot. Tracks both so a rehosted
+   *  URL triggers a reload even though the clip ID stays the same. */
   const loadedRef = useRef<{ a: string | null; b: string | null }>({ a: null, b: null });
 
   const clips = useStore((s) => s.clips);
@@ -31,11 +32,14 @@ export function VideoPreview() {
 
   const slotEl = useCallback((slot: "a" | "b") => slot === "a" ? aRef.current : bRef.current, []);
 
+  const slotKey = (clip: { id: string; videoUrl: string }) => `${clip.id}\0${clip.videoUrl}`;
+
   const loadInto = useCallback((slot: "a" | "b", clip: { id: string; videoUrl: string }) => {
-    if (loadedRef.current[slot] === clip.id) return;
+    const key = slotKey(clip);
+    if (loadedRef.current[slot] === key) return;
     const el = slotEl(slot);
     if (!el) return;
-    loadedRef.current[slot] = clip.id;
+    loadedRef.current[slot] = key;
     el.src = clip.videoUrl;
     el.load();
   }, [slotEl]);
@@ -45,9 +49,10 @@ export function VideoPreview() {
     if (!active) return;
     const back: "a" | "b" = frontSlot === "a" ? "b" : "a";
 
-    if (loadedRef.current[frontSlot] === active.id) {
+    const activeKey = slotKey(active);
+    if (loadedRef.current[frontSlot] === activeKey) {
       // Already loaded on front — nothing to swap.
-    } else if (loadedRef.current[back] === active.id) {
+    } else if (loadedRef.current[back] === activeKey) {
       // The back slot is preloaded with the new active clip — promote it.
       const oldFront = slotEl(frontSlot);
       const newFront = slotEl(back);
@@ -66,7 +71,7 @@ export function VideoPreview() {
       loadInto(frontSlot, active);
     }
 
-    if (next && loadedRef.current[back] !== next.id) {
+    if (next && loadedRef.current[back] !== slotKey(next)) {
       loadInto(back, next);
     }
     // playhead intentionally omitted — only used for the inline seek above,
