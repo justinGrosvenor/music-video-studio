@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useStore } from "../lib/store.js";
 import {
   createAvatar,
@@ -83,6 +83,7 @@ export function LeftRail() {
   const [existingAvatars, setExistingAvatars] = useState<AvatarSummary[] | null>(null);
   const [loadingList, setLoadingList] = useState(false);
   const [showGenerator, setShowGenerator] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const avatarLoading = avatarStatus === "creating";
   const hasAvatar = !!avatarId && avatarStatus === "ready";
@@ -166,7 +167,13 @@ export function LeftRail() {
             >
               <div className="thumb-wrap">
                 {character ? (
-                  <img src={character} className="thumb" alt="" />
+                  <img
+                    src={character}
+                    className="thumb"
+                    alt=""
+                    onClick={(e) => { e.stopPropagation(); setPreviewUrl(character); }}
+                    style={{ cursor: "pointer" }}
+                  />
                 ) : (
                   <div className="thumb placeholder" />
                 )}
@@ -254,7 +261,15 @@ export function LeftRail() {
         </div>
         <div className="lookbook">
           {lookbook.map((url) => (
-            <div key={url} className="tile filled" style={{ backgroundImage: `url(${url})` }}>
+            <div
+              key={url}
+              className="tile filled"
+              style={{ backgroundImage: `url(${url})`, cursor: "pointer" }}
+              onClick={() => setPreviewUrl(url)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => { if (e.key === "Enter") setPreviewUrl(url); }}
+            >
               <button
                 type="button"
                 className="tile-download"
@@ -314,17 +329,17 @@ export function LeftRail() {
             <div key={`ph-${i}`} className="tile placeholder" />
           ))}
         </div>
-        <div className="lookbook-actions">
+        {!showGenerator && (
           <button
             type="button"
-            className="add"
-            onClick={() => setShowGenerator((s) => !s)}
+            className="btn generate-lookbook-btn"
+            onClick={() => setShowGenerator(true)}
             disabled={lookbook.length >= LOOKBOOK_MAX}
-            title={lookbook.length >= LOOKBOOK_MAX ? "lookbook full" : "generate an image"}
+            title={lookbook.length >= LOOKBOOK_MAX ? "lookbook full" : "generate an image with AI"}
           >
-            {showGenerator ? "close" : "generate"}
+            Generate image
           </button>
-        </div>
+        )}
         {showGenerator && (
           <ImageGenerator
             lookbook={lookbook}
@@ -332,6 +347,7 @@ export function LeftRail() {
               addLookbook(url);
               setShowGenerator(false);
             }}
+            onClose={() => setShowGenerator(false)}
             onRehosted={replaceLookbookUrl}
           />
         )}
@@ -350,6 +366,9 @@ export function LeftRail() {
           </div>
         </div>
       )}
+      {previewUrl && (
+        <ImageLightbox url={previewUrl} onClose={() => setPreviewUrl(null)} />
+      )}
     </aside>
   );
 }
@@ -357,10 +376,12 @@ export function LeftRail() {
 function ImageGenerator({
   lookbook,
   onDone,
+  onClose,
   onRehosted,
 }: {
   lookbook: string[];
   onDone: (url: string) => void;
+  onClose: () => void;
   onRehosted: (oldUrl: string, newUrl: string) => void;
 }) {
   const [model, setModel] = useState<TextToImageModel>("gen4_image");
@@ -439,6 +460,10 @@ function ImageGenerator({
 
   return (
     <div className="image-generator">
+      <div className="image-generator-header">
+        <span className="label">Generate image</span>
+        <button type="button" className="add" onClick={onClose} disabled={busy}>close</button>
+      </div>
       <textarea
         className="prompt"
         placeholder="Describe the image…"
@@ -555,6 +580,31 @@ function AvatarPicker({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function ImageLightbox({ url, onClose }: { url: string; onClose: () => void }) {
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={overlayRef}
+      className="lightbox-overlay"
+      onClick={(e) => { if (e.target === overlayRef.current) onClose(); }}
+    >
+      <img src={url} className="lightbox-img" alt="" />
+      <button type="button" className="lightbox-close" onClick={onClose} aria-label="close">
+        ×
+      </button>
     </div>
   );
 }

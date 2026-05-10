@@ -80,6 +80,71 @@ export type EnqueueInput = {
 
 const newJobId = () => `job-${crypto.randomUUID().slice(0, 8)}`;
 
+let resumed = false;
+
+/** Re-poll any clips that were mid-generation when the page last unloaded. */
+export function resumeInflightJobs(): void {
+  if (resumed) return;
+  resumed = true;
+
+  const { clips } = useStore.getState();
+  const inflight = clips.filter(
+    (c) => c.status === "generating" && c.generationTaskId
+  );
+  if (!inflight.length) return;
+
+  console.info(`resuming ${inflight.length} inflight generation(s)`);
+  for (const clip of inflight) {
+    void resumeClipPoll(clip.id, clip.generationTaskId!, clip.model);
+  }
+}
+
+async function resumeClipPoll(
+  clipId: string,
+  taskId: string,
+  model?: GenerationModel,
+): Promise<void> {
+  try {
+    const slow = model === "seedance2" || model === "veo3.1";
+    const final: Task = await pollTask(taskId, slow ? 5000 : 2500, slow ? 900_000 : 600_000);
+
+    if (final.status === "SUCCEEDED" && final.output?.[0]) {
+      const videoUrl = final.output[0];
+      useStore.getState().updateClip(clipId, {
+        videoUrl,
+        status: "ready",
+        lastError: undefined,
+      });
+      toast.success("Resumed clip ready");
+
+      const clip = useStore.getState().clips.find((c) => c.id === clipId);
+      void saveClipToServer({
+        id: clipId,
+        name: clip?.prompt?.slice(0, 60) || "resumed clip",
+        videoUrl,
+        source: clip?.source ?? "continue",
+        prompt: clip?.prompt || null,
+        duration: clip ? clip.end - clip.start : 5,
+        sectionLabel: "resumed",
+      })
+        .then((saved) => {
+          if (saved.videoUrl && saved.videoUrl !== videoUrl) {
+            useStore.getState().updateClip(clipId, { videoUrl: saved.videoUrl });
+          }
+        })
+        .catch((err) => console.warn("auto-save resumed clip failed", err));
+    } else {
+      const reason = final.error ?? `task ended in ${final.status}`;
+      useStore.getState().updateClip(clipId, { status: "failed", lastError: reason });
+      toast.error(`Resumed generation failed: ${reason.slice(0, 80)}`);
+    }
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    useStore.getState().updateClip(clipId, { status: "failed", lastError: reason });
+    toast.error(`Resumed generation failed: ${reason.slice(0, 80)}`);
+  }
+}
+
 export function enqueueGeneration(input: EnqueueInput): string {
   const existing = useStore.getState().jobs.filter(
     (j) => j.clipId === input.clipId && (j.state === "queued" || j.state === "running")

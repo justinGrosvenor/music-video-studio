@@ -458,7 +458,7 @@ export const useStore = create<State>()(
         }
         const ps = result.data;
         const clips = (ps.clips ?? []).map((c) =>
-          c.status === "queued" || c.status === "generating"
+          c.status === "queued"
             ? { ...c, status: "empty" as const, generationTaskId: undefined }
             : c
         );

@@ -642,21 +642,36 @@ textarea.prompt {
 textarea.prompt:focus { border-color: var(--accent-dim); outline: none; }
 textarea.prompt::placeholder { color: var(--text-faint); }
 
-/* Right-aligned action row beneath the Lookbook tile grid. */
-.lookbook-actions {
-  display: flex; justify-content: flex-end;
-  margin-top: 6px;
+.generate-lookbook-btn {
+  width: 100%;
+  margin-top: var(--sp-2);
+  font-size: 12px;
+  padding: 8px 12px;
+  background: var(--accent);
+  color: white;
+  border: 1px solid transparent;
+  border-radius: var(--r-2);
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 120ms ease, transform 80ms ease;
 }
-.lookbook-actions .add { font-size: 11px; }
+.generate-lookbook-btn:hover { background: var(--accent-2); }
+.generate-lookbook-btn:active { transform: translateY(1px); }
+.generate-lookbook-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
 
 /* Lookbook image generator — sits under the lookbook tile grid when toggled. */
 .image-generator {
   display: flex; flex-direction: column; gap: var(--sp-2);
-  margin-top: var(--sp-3);
+  margin-top: var(--sp-2);
   padding: var(--sp-3);
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--r-2);
+}
+.image-generator-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 .image-generator-row { display: flex; gap: var(--sp-2); }
 .image-generator-row .select { flex: 1; min-width: 0; }
@@ -917,6 +932,33 @@ body.dragging-resize .resize-handle { background: rgba(124, 92, 255, 0.6); }
 .timeline-dropzone .inner:hover { border-color: var(--border-strong); color: var(--text); }
 .timeline-dropzone .big { font-size: 17px; color: var(--text); font-weight: 500; }
 .timeline-dropzone .sub { font-size: 12px; color: var(--text-faint); }
+
+/* Image lightbox */
+.lightbox-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+}
+.lightbox-img {
+  max-width: 90vw; max-height: 90vh;
+  object-fit: contain;
+  border-radius: var(--r-2);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+  cursor: default;
+}
+.lightbox-close {
+  position: fixed; top: 16px; right: 20px;
+  background: rgba(0, 0, 0, 0.5); border: 0;
+  color: white; font-size: 28px; line-height: 1;
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 100ms ease;
+}
+.lightbox-close:hover { background: rgba(255, 255, 255, 0.15); }
 
 /* Library modal */
 .library-overlay {
