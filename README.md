@@ -1,10 +1,26 @@
 # Music Video Studio
 
-Audio-aware AI timeline editor for music videos. Drop in a song, get a beat-aware timeline of clips, fill each one with Runway-generated video, and render to MP4.
+> Audio-aware AI timeline editor for music videos. Drop in a song, get a beat-aware timeline of clips, fill each one with AI-generated video, and render to MP4.
+
+![Music Video Studio](docs/editor.png)
+
+**Live demo:** https://d12ma5ztmnspan.cloudfront.net (basic-auth gated — creds on request).
+
 
 ## What it does
 
-Upload a track → Modal sidecar analyzes BPM / beats / sections / energy → the timeline auto-subdivides into clips snapped to detected boundaries → for each clip you pick a generation source (continue, lookbook seed, fresh text-to-image, text-to-video, lip-sync, video-restyle) and a Runway model, then click Generate → ffmpeg stitches the finished clips into an MP4 against the original audio.
+Upload a track → audio analyzer extracts BPM / beats / sections / energy → the timeline auto-subdivides into clips snapped to detected boundaries → for each clip you pick a generation source (continue, lookbook seed, fresh text-to-image, text-to-video, lip-sync, video-restyle) and a model, then click Generate → ffmpeg stitches the finished clips into an MP4 against the original audio.
+
+## Repo layout
+
+| Path | What |
+|---|---|
+| `apps/web` | React 19 + Vite SPA — timeline, waveform, sidebar, preview |
+| `apps/api` | Fastify API — generation, render, storage, library |
+| `packages/shared` | Zod schemas + TS types shared across web and api |
+| `modal/` | Python audio analysis (librosa) — see [modal/README.md](modal/README.md) |
+| `infra/` | Terragrunt + Terraform for AWS deploy — see [infra/README.md](infra/README.md) |
+| `wireframes/` | Initial design exploration |
 
 ## Features
 
@@ -186,9 +202,8 @@ Container disk is ephemeral. Mount EFS at `/app/storage` if you need local-backe
 
 See `infra/README.md` for the Terragrunt + Terraform bootstrap flow.
 
-## Roadmap / known limitations
+## Known limitations
 
-- `actTwo` source is stubbed in the schema and UI but not yet wired to a webcam-recording flow.
-- Runway-hosted output URLs expire 24–48h after creation. Generated clips and lookbook images are auto-rehosted to local/S3 storage, but externally-pasted URLs are not.
+- Externally-pasted generation URLs expire 24–48h after creation. Generated clips and lookbook images are auto-rehosted to local/S3 storage on save, but a direct paste of a still-live URL is not.
 - Section labels are positional (`section 1`, `section 2`, …) — semantic labels (`verse`, `chorus`, `bridge`) require swapping the analyzer for `allin1` (GPU, Modal-only).
 - Render is a v1 overlay graph: hard cuts by default with optional 150ms alpha fades. No crossfades or transitions yet.
