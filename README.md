@@ -2,6 +2,8 @@
 
 > Audio-aware AI timeline editor for music videos. Drop in a song, get a beat-aware timeline of clips, fill each one with AI-generated video, and render to MP4.
 
+https://github.com/user-attachments/assets/94b6d14f-810e-4a53-9af6-22135417e87c
+
 ![Music Video Studio — night-drive project](docs/editor-2.png)
 
 *Night-drive project: audio-analysis panel on the left, lookbook above it, section-labeled timeline below, mid-generation state visible.*
