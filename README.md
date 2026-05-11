@@ -4,7 +4,11 @@
 
 ![Music Video Studio — night-drive project](docs/editor-2.png)
 
+*Night-drive project: audio-analysis panel on the left, lookbook above it, section-labeled timeline below, mid-generation state visible.*
+
 ![Music Video Studio — cyberpunk project](docs/editor.png)
+
+*A different project with the per-clip source picker open — every clip on the timeline can use a different generation path.*
 
 **Live demo:** https://d12ma5ztmnspan.cloudfront.net (basic-auth gated — creds on request).
 
