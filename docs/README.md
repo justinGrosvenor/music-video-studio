@@ -4,4 +4,5 @@ Static assets referenced from the root README.
 
 | File | Used for |
 |---|---|
-| `editor.png` | Hero shot in `README.md`. Suggested framing: waveform with section overlay on top, clip lanes below, right sidebar visible with a clip selected mid-generation. 1280×720 or larger. |
+| `editor-2.png` | Current hero shot in `README.md`. Night-drive project: audio-analysis panel, avatar system, lookbook with consistent style, section-labeled timeline, mid-generation state visible. |
+| `editor.png` | Earlier hero shot — cyberpunk robot center frame with picker open. Kept around as an alternate. |
