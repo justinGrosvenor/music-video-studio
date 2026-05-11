@@ -4,6 +4,8 @@
 
 https://github.com/user-attachments/assets/94b6d14f-810e-4a53-9af6-22135417e87c
 
+*Music in the demo: [out yesterday on Spotify](https://open.spotify.com/album/0qT88s29ZYPSsnXdSFzGxI?si=CYHK5WwoREeWhQKW1sfVOA).*
+
 ![Music Video Studio — night-drive project](docs/editor-2.png)
 
 *Night-drive project: audio-analysis panel on the left, lookbook above it, section-labeled timeline below, mid-generation state visible.*
