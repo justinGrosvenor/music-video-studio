@@ -34,7 +34,10 @@ const TEXT_TO_VIDEO_MODELS: Array<{ value: GenerationModel; label: string; desc:
   { value: "veo3.1_fast", label: "Veo 3.1 Fast", desc: "faster · 4 / 6 / 8s" },
 ];
 
-// Aleph (video-to-video) constrains to gen4_aleph or seedance2.
+// Aleph (video-to-video) constrains to gen4_aleph or seedance2 server-side.
+// The UI carries gen4_turbo as the picker value because GenerationModel
+// (kept narrow for the rest of the UI) doesn't include gen4_aleph; the
+// scheduler remaps gen4_turbo → gen4_aleph at submit time for this source.
 const ALEPH_MODELS: Array<{ value: GenerationModel; label: string; desc: string }> = [
   { value: "gen4_turbo", label: "Gen-4 Aleph", desc: "primary restyle path" },
   { value: "seedance2", label: "SeedDance 2", desc: "alt restyle" },
