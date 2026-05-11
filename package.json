@@ -1,8 +1,21 @@
 {
   "name": "music-video-studio",
   "version": "0.0.1",
+  "description": "Audio-aware AI timeline editor for music videos.",
   "private": true,
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/justinGrosvenor/music-video-studio.git"
+  },
+  "keywords": [
+    "music-video",
+    "timeline-editor",
+    "generative-video",
+    "audio-analysis",
+    "ffmpeg"
+  ],
   "scripts": {
     "dev": "pnpm --filter @mvs/shared build && pnpm -r --parallel run dev",
     "build": "pnpm -r build",

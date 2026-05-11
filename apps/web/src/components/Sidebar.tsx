@@ -14,7 +14,6 @@ const SOURCES: Array<{ value: Clip["source"]; label: string; desc: string }> = [
   { value: "textToVideo", label: "Text-to-video", desc: "prompt → video directly, no seed image" },
   { value: "library", label: "From clip library", desc: "reuse a previously saved clip — no generation" },
   { value: "lipSync", label: "Character sings this section", desc: "Lip Sync · vocal stem" },
-  { value: "actTwo", label: "Hero performance shot", desc: "Act-Two · record yourself · ≤30s" },
   { value: "aleph", label: "Restyle existing clip", desc: "Aleph · video-to-video" },
 ];
 
@@ -81,7 +80,6 @@ export function Sidebar() {
     clip.model ?? (clip.source === "continue" ? "veo3.1_fast" : "seedance2");
   const showModelPicker =
     clip.source !== "lipSync" &&
-    clip.source !== "actTwo" &&
     clip.source !== "library";
   const isLibrarySource = clip.source === "library";
 
@@ -337,11 +335,6 @@ function checkCanGenerate(
       return { ok: false, reason: "First clip needs a previous clip or a character image to seed from" };
     }
     return { ok: true };
-  }
-  if (clip.source === "actTwo") {
-    // Webcam recording isn't wired yet; the picker option ships ahead of
-    // implementation. Block here so we don't enqueue with an empty seed.
-    return { ok: false, reason: "Act-Two webcam capture is not wired yet — coming soon" };
   }
   if (!ctx.characterImage) return { ok: false, reason: "Upload a character image first" };
   return { ok: true };

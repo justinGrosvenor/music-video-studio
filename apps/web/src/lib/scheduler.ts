@@ -372,7 +372,6 @@ async function startTask(job: Job): Promise<{ id: string }> {
 
   // Default path: image-to-video. Used by `continue`, `archetype`, and
   // `generated` (which first generates the seed image from text).
-  // (`actTwo` will need its own branch once we wire webcam recording.)
   let seed = job.input.seedImageUrl;
   let seedEnd: string | undefined;
   const finalPrompt = promptText;

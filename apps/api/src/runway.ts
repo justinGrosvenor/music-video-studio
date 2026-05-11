@@ -5,7 +5,6 @@ import type {
   VideoToVideoRequest,
   LipSyncRequest,
   VoiceIsolationRequest,
-  ActTwoRequest,
   TextToImageRequest,
   TextToVideoRequest,
 } from "@mvs/shared";
@@ -21,9 +20,6 @@ import { resolveLocalPath, mimeType } from "./paths.js";
 export const runway = new RunwayML({
   apiKey: config.RUNWAYML_API_SECRET ?? "missing-RUNWAYML_API_SECRET",
 });
-// Despite the `.dev` subdomain, this is Runway's production developer API.
-const RUNWAY_BASE = config.RUNWAYML_BASE_URL;
-
 export type RunwayTask = { id: string };
 
 export class RunwayRateLimitError extends Error {
@@ -292,51 +288,6 @@ export async function textToImage(req: TextToImageRequest): Promise<RunwayTask> 
   } catch (err) { rethrowRunway(err); }
 }
 
-export async function actTwo(req: ActTwoRequest): Promise<RunwayTask> {
-  try {
-    const task = await runway.characterPerformance.create({
-      model: "act_two",
-      ratio: req.ratio,
-      bodyControl: req.bodyControl,
-      expressionIntensity: req.expressionIntensity,
-      character: { type: "image", uri: req.characterImageUri },
-      reference: { type: "video", uri: req.drivingVideoUri },
-    });
-    return { id: task.id };
-  } catch (err) { rethrowRunway(err); }
-}
-
-// --- Endpoints not exposed by the typed SDK ---
-// Voice-Isolation exists in the REST API but isn't surfaced by the SDK; we
-// hit it with raw fetch and rely on the same task-status machinery for
-// polling. (Lip-Sync is now in the typed SDK as `runway.avatarVideos.create`
-// and uses the normal path above.)
-
-async function rawCreate(path: string, body: unknown): Promise<RunwayTask> {
-  if (!config.RUNWAYML_API_SECRET) {
-    throw new Error("RUNWAYML_API_SECRET not set");
-  }
-  const res = await fetch(`${RUNWAY_BASE}${path}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${config.RUNWAYML_API_SECRET}`,
-      "X-Runway-Version": "2024-11-06",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const detail = await res.text();
-    const msg = `runway ${path} failed: ${res.status} ${detail}`;
-    if (res.status === 429 || detail.toLowerCase().includes("task limit")) {
-      throw new RunwayRateLimitError(msg);
-    }
-    throw new Error(msg);
-  }
-  const json = (await res.json()) as { id: string };
-  return { id: json.id };
-}
-
 const RUNWAY_MAX_DIM = 4000;
 
 async function constrainImage(buf: Buffer): Promise<Buffer> {
@@ -428,9 +379,12 @@ export async function lipSync(req: LipSyncRequest): Promise<RunwayTask> {
 
 export async function voiceIsolation(req: VoiceIsolationRequest): Promise<RunwayTask> {
   try {
+    // Use the ephemeral upload path (returns runway://) instead of a base64
+    // data URI. Same approach as lipSync's audioUri above; avoids the ~33%
+    // base64 bloat and the body-size ceiling on multi-megabyte audio.
     const task = await runway.voiceIsolation.create({
       model: "eleven_voice_isolation",
-      audioUri: await toDataUri(req.audioUri),
+      audioUri: await toRunwayUri(req.audioUri),
     });
     return { id: task.id };
   } catch (err) { rethrowRunway(err); }

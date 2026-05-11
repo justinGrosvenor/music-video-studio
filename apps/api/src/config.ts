@@ -12,9 +12,6 @@ const optionalNonEmpty = z
 
 const Env = z.object({
   RUNWAYML_API_SECRET: optionalNonEmpty.optional(),
-  // Despite the `.dev` subdomain, this IS Runway's production developer
-  // API base. Override only if Runway publishes a new endpoint.
-  RUNWAYML_BASE_URL: z.string().url().default("https://api.dev.runwayml.com"),
   MODAL_AUDIO_URL: optionalUrl.optional(),
   PORT: z.coerce.number().default(3001),
   PUBLIC_BASE_URL: z.string().url().default("http://localhost:3001"),
