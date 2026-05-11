@@ -6,9 +6,9 @@
 
 *Night-drive project: audio-analysis panel on the left, lookbook above it, section-labeled timeline below, mid-generation state visible.*
 
-![Music Video Studio — cyberpunk project](docs/editor.png)
+![Music Video Studio — biomech project](docs/editor.png)
 
-*A different project with the per-clip source picker open — every clip on the timeline can use a different generation path.*
+*A different project mid-edit: the **AUDIO CONTEXT** panel auto-feeds section / energy / duration into every generation, and **Bridge between neighbors** interpolates from the previous clip's last frame to the next's first frame for seamless cuts.*
 
 **Live demo:** https://d12ma5ztmnspan.cloudfront.net (basic-auth gated — creds on request).
 
