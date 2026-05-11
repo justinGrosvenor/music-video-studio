@@ -16,7 +16,12 @@ import { isIP } from "node:net";
  */
 export async function assertSafeHost(url: string): Promise<void> {
   const u = new URL(url);
-  const host = u.hostname;
+  // IPv6 hostnames come back wrapped in brackets (e.g. "[::1]") — strip
+  // them so `isIP` can recognize the literal form, otherwise we'd fall
+  // through to DNS lookup with an invalid hostname.
+  const host = u.hostname.startsWith("[") && u.hostname.endsWith("]")
+    ? u.hostname.slice(1, -1)
+    : u.hostname;
   if (isIP(host)) {
     if (isPrivateIp(host)) throw new Error(`refusing to use private IP ${host}`);
     return;
@@ -55,8 +60,17 @@ function isPrivateIpv6(addr: string): boolean {
   const lower = addr.toLowerCase();
   if (lower === "::1" || lower === "::") return true;
   if (lower.startsWith("::ffff:")) {
-    const v4 = lower.slice(7);
-    if (isIP(v4) === 4) return isPrivateIpv4(v4);
+    const rest = lower.slice(7);
+    // Text form: ::ffff:a.b.c.d
+    if (isIP(rest) === 4) return isPrivateIpv4(rest);
+    // Normalized hex form: ::ffff:HHHH:HHHH (Node's URL parser produces this)
+    const m = rest.match(/^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (m) {
+      const hi = parseInt(m[1]!, 16);
+      const lo = parseInt(m[2]!, 16);
+      const v4 = `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+      return isPrivateIpv4(v4);
+    }
   }
   if (/^fe[89ab][0-9a-f]:/.test(lower)) return true;
   if (/^f[cd][0-9a-f][0-9a-f]:/.test(lower)) return true;
