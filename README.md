@@ -4,7 +4,7 @@
 
 https://github.com/user-attachments/assets/94b6d14f-810e-4a53-9af6-22135417e87c
 
-*Music in the demo: [listen on Spotify](https://open.spotify.com/album/0qT88s29ZYPSsnXdSFzGxI?si=CYHK5WwoREeWhQKW1sfVOA).*
+*Music in the demo: "HEY MOON" by [ANIMUSCULT](https://open.spotify.com/album/0qT88s29ZYPSsnXdSFzGxI?si=CYHK5WwoREeWhQKW1sfVOA).*
 
 ![Music Video Studio — night-drive project](docs/editor-2.png)
 
