@@ -14,9 +14,6 @@ https://github.com/user-attachments/assets/94b6d14f-810e-4a53-9af6-22135417e87c
 
 *A different project mid-edit: the **AUDIO CONTEXT** panel auto-feeds section / energy / duration into every generation, and **Bridge between neighbors** interpolates from the previous clip's last frame to the next's first frame for seamless cuts.*
 
-**Live demo:** https://d12ma5ztmnspan.cloudfront.net (basic-auth gated — creds on request).
-
-
 ## What it does
 
 Upload a track → audio analyzer extracts BPM / beats / sections / energy → the timeline auto-subdivides into clips snapped to detected boundaries → for each clip you pick a generation source (continue, lookbook seed, fresh text-to-image, text-to-video, lip-sync, video-restyle) and a model, then click Generate → ffmpeg stitches the finished clips into an MP4 against the original audio.
