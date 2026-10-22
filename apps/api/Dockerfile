@@ -1,5 +1,5 @@
 # --- API build stage: compile the Fastify TS sources for the workspace.
-FROM node:22-bookworm-slim AS api-build
+FROM node:22.23.4-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS api-build
 
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
@@ -28,7 +28,7 @@ RUN pnpm --filter @mvs/api --prod --legacy deploy /out
 
 
 # --- Web build stage: build the SPA (Vite) so the runtime can serve it.
-FROM node:22-bookworm-slim AS web-build
+FROM node:22.23.4-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS web-build
 
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
@@ -50,7 +50,7 @@ RUN pnpm --filter @mvs/web build
 
 
 # --- Runtime: minimal image with ffmpeg, the API bundle, and the SPA dist.
-FROM node:22-bookworm-slim AS runtime
+FROM node:22.23.4-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
